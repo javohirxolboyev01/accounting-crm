@@ -1,0 +1,18 @@
+{
+  "name": "buxgalteriya-crm",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "test": "npm test -w apps/api",
+    "db:migrate": "npm run migrate -w apps/api",
+    "db:seed": "npm run seed:dev -w apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,0 +1,196 @@
+# Buxgalteriya firmasi uchun CRM
+
+Buxgalterlar ishini avtomatlashtirish va rahbar nazorati uchun tizim.
+Bu fayl loyiha ildizida `CLAUDE.md` nomi bilan turadi. Har bosqichda shu kontekstga tayaning.
+
+## 1. Maqsad
+
+- ~100 mijoz (80 faol, 20 nol hisobot), 7 buxgalter, 3 rahbar.
+- Vazifalar (oylik doimiy ishlar + hisobotlar) har oy o'zi yaratiladi.
+- Buxgalter "Bajarildi" bosadi, rahbarga bildirishnoma boradi.
+- Rahbar kim nima qilayotganini, nima kechikayotganini bir qarashda ko'radi.
+- Hozirgi Google Sheet bilan doimiy ikki tomonlama sinxron.
+- Interfeys tillari: o'zbek (lotin) va rus.
+- Barcha sana/vaqt mantiqi: `Asia/Tashkent`.
+
+## 2. Texnologiya (0-bosqichda tanlangan: Node.js varianti)
+
+- Monorepo (npm workspaces): `apps/web`, `apps/api`, `docker-compose.yml`.
+- Frontend: React 18, TypeScript, Vite, Tailwind CSS, shadcn uslubidagi lokal komponentlar (`apps/web/src/components/ui`), TanStack Query, react-i18next.
+- UI dizayni WinPro admin CRM bilan bir xil: teal brend (`brand-500` #37a0ad), navy (#1a344d) matn, Inter shrifti, `bg-page` foni ustida oq `section-container` bloklar, chap yig'iladigan sidebar, teal sarlavhali jadvallar (`table-head`). Tokenlar `apps/web/tailwind.config.js`, umumiy sinflar `apps/web/src/index.css`da. Neytral rang — `gray-*` (qorong'i rejimda avtomatik aylanadi); `brand-*` aylanmaydi, qorong'i variant `dark:` bilan yoziladi; rangli fon ustidagi oq matn — `text-on-brand`.
+- Ochiladigan ro'yxat va sana: native `<select>`/`type="date|month|datetime-local"` ishlatilmaydi — WinPro'dagidek `ui/select.tsx` (`Select`, `options` + `onChange(value)`, `clearable` bo'sh qiymatli filtrlar uchun) va `ui/date-picker.tsx` (`DatePicker` 'yyyy-MM-dd', `MonthPicker` 'yyyy-MM', luxon asosida). Ikkalasi `ui/popover.tsx` orqali body'ga portal qilinadi (jadval/modal overflow kesmasin).
+- Backend: Node.js 20+ / Express 5 / TypeScript, PostgreSQL 16, `pg` (toza SQL), Flyway uslubidagi SQL migratsiyalar (`apps/api/migrations/V<n>__<nom>.sql`, checksum bilan), JWT (access + aylanuvchi refresh cookie), zod validatsiya, `node-cron` rejalashtirish.
+- ORM ishlatilmaydi: partial unique index, trigger, view va SQL funksiyalar (X qoidasi) to'g'ridan-to'g'ri SQL'da.
+- Bildirishnoma: Telegram bot (faqat xodimlarga, long polling) + ilova ichidagi bildirishnoma (SSE).
+- Sheets: Google Sheets API (service account), import uchun `.xlsx` (exceljs).
+- Testlar: vitest + supertest (haqiqiy PostgreSQL test bazasi), Playwright smoke (alohida e2e bazasi).
+
+## 3. Ishlash qoidalari (Claude uchun)
+
+- Kichik, aniq o'zgarishlar: faqat so'ralgan narsani qiling, so'ralmagan funksiya qo'shmang.
+- Mavjud kod tuzilmasini saqlang, keraksiz refaktoring qilmang.
+- To'liq, ishlaydigan fayllar bering, qisman snippet emas.
+- Muhim arxitektura qarorini qisqa izoh bilan (nima uchun) yozing.
+- Har bosqich oxirida: ishga tushirish buyrug'i, nimalar tekshirildi, nimalar qolgani.
+- Taxmin qilgan joyingizni `TODO(tasdiqlash):` bilan belgilang va oxirida ro'yxat qiling.
+- Qo'llangan migratsiyani o'zgartirmang (checksum xatosi beradi): yangi `V<n+1>__...sql` yozing.
+
+## 4. Rollar va ruxsatlar
+
+- **Rahbar (3):** hamma mijoz, hamma vazifa, dashboard, sozlamalar, buxgalter tayinlash, shoshilinch vazifa.
+- **Buxgalter (7):** faqat o'ziga biriktirilgan mijozlar va ularning vazifalari.
+- Ruxsat tekshiruvi **serverda** (frontend yashirishi yetarli emas).
+
+## 5. Ma'lumotlar modeli (asos)
+
+- `user` (role: LEADER | ACCOUNTANT, til, telegram_chat_id)
+- `client`: stir (unique), name, name_normalized, contact_person, phone, tax_type (AOS | QQS), tax_type_effective_from, accountant_id, status (ACTIVE | ZERO_REPORT | LIQUIDATING), note
+- `client_tax_type_history`: client_id, tax_type, effective_from (rejim o'zgarsa hisobotlar shu sanadan almashadi)
+- `report_type`: code, name, frequency (MONTHLY | QUARTERLY | YEARLY), due_day, applies_to (AOS/QQS), active, creates_accountant_task (INPS = true, qolganlari = false, `TODO(tasdiqlash)`), generation_months (chorak: 1,4,7,10; yillik: 2)
+- `routine_work_type`: name, order, active (ko'pi bilan 10 ta; boshlang'ich 8 ta)
+- `task`: client_id, kind (ROUTINE | REPORT | URGENT | MANUAL), type_id, period (YYYY-MM), title, note, assignee_id, due_at, status (TODO | IN_PROGRESS | WAITING_CLIENT | DONE), done_at, created_by
+  - Unique: (client_id, kind, type_id, period) — takroriy generatsiyadan himoya.
+- `task_checklist_item`: task_id, text, done
+- `time_entry`: task_id, user_id, started_at, ended_at
+- `audit_log`: **faqat qo'shiladi** (UPDATE/DELETE yo'q): actor, entity, entity_id, action, before, after, at
+- `notification`: user_id, kind, payload, deliver_at, delivered_at, cancelled_at
+- `setting`: key/value (urgent shablonlar, va h.k.)
+
+## 6. Biznes qoidalari
+
+### 6.1 Mijoz kartasi maydonlari
+STIR, korxona nomi, mas'ul shaxs (FISH + telefon), soliq turi, javobgar buxgalter, holati (Faol / Nol hisobot / Tugatilmoqda), soliq turi qachondan yangi, izoh.
+Mas'ul shaxs telefoni faqat aloqa ma'lumoti (mijozga avtomatik xabar **yuborilmaydi**).
+
+### 6.2 Oylik doimiy ishlar (har oyning 1-kuni, faol mijozlarga)
+1. INPS hisoboti
+2. Ish haqi hisoblash
+3. Bank aylanmalarini kiritish
+4. Kirim hisobvaraq-fakturalarini kiritish
+5. Chiqim hisobvaraq-fakturalarini kiritish
+6. Debitor-kreditorlar bilan ishlash
+7. Boshqa ishlar (har oy buxgalter o'zi erkin matn yozadi)
+8. Oyni yopish
+
+- Ishlar soni ko'pi bilan 10; rahbar sozlamada qo'shadi/olib tashlaydi/nomini o'zgartiradi; yangi ish keyingi oydan chiqadi.
+- INPS ham "ish", ham "hisobot": **bitta** vazifa (ikki marta yaratilmaydi).
+- **Nol hisobot** mijozlarga 8 ta oylik ish chiqmaydi, faqat hisobotlar.
+- **Tugatilmoqda** mijozga hisobot vazifasi chiqmaydi.
+
+### 6.3 Hisobotlar (soliq turiga qarab avtomatik)
+
+| Hisobot | Davr | Muddat | AOS | QQS |
+|---|---|---|---|---|
+| JShDS | oylik | 15-sana | ha | ha |
+| To'lov manbaidan ushlanadigan soliq | oylik | 15-sana | ha | ha |
+| AOS | oylik | 15-sana | ha | yo'q |
+| QQS | oylik | 20-sana | yo'q | ha |
+| INPS | oylik | hisobot oyidan keyingi oyning 15-kuni | ha | ha |
+| Poruchenya JShDS (to'lov topshiriqnomasi) | oylik, hamma mijoz | `TODO(tasdiqlash)`: muddat kuni | ha | ha |
+| Foyda solig'i | choraklik (yan/apr/iyul/okt) | 20-sana | yo'q | ha |
+| Dividend hisoboti | choraklik, faqat dividend to'langan chorakda | hisobot oyidan keyingi oyning 20-kuni | ha | ha |
+| Moliyaviy natijalar | yillik | keyingi yilning 15-fevrali | ha | ha |
+| Buxgalteriya balansi | yillik | keyingi yilning 15-fevrali | ha | ha |
+| Statistika hisoboti | yillik | keyingi yilning 15-fevrali | ha | ha |
+
+#### Asosiy qoida: soliq turi va "X"
+
+Korxonalar 2 sinfga bo'linadi: **QQS to'lovchi** va **AOS to'lovchi**. QQS to'lovchi AOS to'lamaydi.
+
+- Soliq turini **rahbar o'zi tanlaydi** (mijoz kartasida ochiladigan ro'yxat: `QQS` yoki `AOS`, boshqa qiymat yo'q). Buxgalter ko'radi, o'zgartirmaydi (`TODO(tasdiqlash)`).
+- Tanlovga qarab hisobot katakchalari **avtomatik** belgilanadi, qo'lda "X" qo'yilmaydi:
+
+| Tanlangan tur | AOS | QQS | Foyda solig'i | Qolgan hisobotlar |
+|---|---|---|---|---|
+| **AOS** | bor | **X** | **X** | bor |
+| **QQS** | **X** | bor | bor | bor |
+
+- "X" = topshirilmaydi: vazifa **yaratilmaydi**, oylik jadvalda "—" ko'rinadi (jadvaldagi "X" ning o'zi).
+- Katak qiymatlari: `1` faqat **topshirilgandan keyin** yoziladi ("Bajarildi" bosilganda), `0` hali topshirilmagan, `X` topshirilmaydi.
+- Haqiqiy jadvaldan misol: SHERPROM STROY (AOS) — QQS va Foyda `X`; INSAR MIX TRADE (QQS) — AOS `X`.
+- Tur o'zgarsa (`tax_type_effective_from`): shu sanadan boshlab hisobotlar ro'yxati almashadi. Joriy davrda endi qo'llanmaydigan **ochiq** vazifalar bekor qilinadi (o'chirilmaydi, `audit_log`'da qoladi), yangi qo'llanadiganlari yaratiladi, **bajarilganlari** o'zgarmaydi.
+- Qoida kodda qotirilmagan: `report_type.applies_to` ma'lumotidan o'qiladi (6.3 jadvali seed).
+
+- Generatsiya har oyning 1-kuni; muddat shu oy ichida (Oktyabrda INPS = 15.10, dividend = 20.10).
+- Muddat kunlari va "qaysi soliq turiga qaysi hisobot" qoidasi **ma'lumot sifatida** (`report_type`), kodga qotirilmaydi. Qonun o'zgarsa rahbar sozlamadan tuzatadi.
+- Dividend: mijoz kartasida "shu chorakda dividend to'langan" belgisi bo'lsa vazifa chiqadi (`TODO(tasdiqlash)`: kim belgilaydi — taxmin: buxgalter yoki rahbar).
+- Soliq turi o'zgarsa (`effective_from`), hisobotlar ro'yxati shu sanadan almashadi; o'tgan davrlar o'zgarmaydi.
+
+### 6.4 Vazifa holatlari
+`Bajarilishi kerak → Jarayonda → Mijozdan kutilmoqda → Bajarildi`
+- "Jarayonda" bosilganda taymer o'zi yoqiladi (`time_entry`), holatdan chiqqanda to'xtaydi.
+- "Mijozdan kutilmoqda" kechikish buxgalter aybi emasligini ko'rsatadi.
+- Ish 1C'da bajariladi, tizimda faqat holat belgilanadi.
+
+### 6.5 Ranglar
+- Qizil: muddati o'tgan
+- Sariq: muddatga 24 soatdan kam qoldi
+- To'q sariq: mijozdan hujjat kutilmoqda
+- Yashil: bajarildi
+- "Muddati o'tgan" **saqlanmaydi**, `due_at` va holatdan hisoblanadi.
+
+### 6.6 "Bajarildi" bosilganda
+1. Buxgalter "Bajarildi" bosadi (yoki oylik jadvalda katakchani bosadi).
+2. Rahbarga bildirishnoma boradi.
+3. Xato bosilsa 5 soniya ichida "Bekor qilish" mumkin.
+
+Qaror: bildirishnoma `deliver_at = now + 5s` bilan navbatga qo'yiladi; "Bekor qilish" holatni qaytaradi va bildirishnomani `cancelled_at` bilan bekor qiladi. Shunda rahbarga xato xabar ketmaydi.
+
+### 6.7 Eslatmalar
+- Muddatga 24 soat qolganda vazifa sariq.
+- Muddat o'tsa qizil, buxgalter va rahbarga xabar.
+
+### 6.8 Buxgalter almashsa
+Rahbar mijozga boshqa buxgalter tayinlaydi; tugallanmagan vazifalar yangisiga o'tadi, bajarilganlari eskisida tarixda qoladi. Hammasi `audit_log`'da.
+
+### 6.9 Shoshilinch vazifa (10 soniya)
+"+ Shoshilinch": mijoz tanlanadi, matn yoziladi yoki tayyor shablon; tizim **eng kam ochiq vazifali** buxgalterni birinchi taklif qiladi; buxgalter ekranida qizil xabar + Telegram; muddat odatda shu kuni 18:00.
+
+### 6.10 Oylik jadval (Google Sheet ko'rinishi)
+Qatorda mijoz, ustunda hisobot va muddati. Katakcha holati vazifadan olinadi:
+
+| Katak | Ma'nosi |
+|---|---|
+| `1` / ✓ | topshirildi (vazifa DONE) |
+| `0` / ○ | hali topshirilmagan (vazifa ochiq) |
+| `!` | muddati o'tdi (hisoblanadi) |
+| `X` / — | topshirmaydi (vazifa yaratilmaydi, soliq turi/holat sabab) |
+
+Katakchani bosish vazifani "Bajarildi" qiladi.
+
+### 6.11 Dashboard
+- Mijozlar bo'yicha: joriy oy tayyor / jarayonda / kechikkan, umumiy foiz, muddati o'tganlar ro'yxati.
+- Buxgalterlar bo'yicha: bajargan (kun/hafta/oy), o'z vaqtida foiz, kechikkan, ochiq vazifa (yuklama), ishga sarflangan vaqt.
+- "O'z vaqtida" = `done_at <= due_at`.
+
+## 7. Google Sheets bilan ma'lumot almashish
+
+Haqiqiy jadval ustunlari:
+`№ | STIR | Korxona nomi | Soliq turi | JSHDS dd.mm.yyyy | To'lov manbai dd.mm.yyyy | AOS dd.mm.yyyy | QQS dd.mm.yyyy | FOYDA dd.mm.yyyy | INPS | Poruchenya JSHDS | Қилиниши лозим бўлган ишлар`
+
+- Oxirgi ustun **erkin izoh** (masalan "Tugatishga bergan", "01.01.2026 dan AOS to'lovchisi"). Doimiy ishlar ro'yxati emas.
+- Migratsiyada izoh uch joyga bo'linadi: `status` (Tugatishga bergan → LIQUIDATING), `tax_type_effective_from` (01.01.2026), `note`. Avtomatik ajratib bo'lmaganlar **qo'lda tekshirish hisobotiga** tushadi, jim taxmin qilinmaydi.
+- Kirill/lotin aralashmasi: `AOC`/`AOS`, `ҚҚС`/`QQS` → `tax_type` enumga normallashtiriladi; `name_normalized` (kirill→lotin, kichik harf, MChJ/МЧЖ bir xil) qidiruv uchun.
+- Sarlavhadagi sanalar har oyda o'zgaradi (yangi ustun/varaq); ustunni sarlavha matnidan aniqlang, indeksdan emas.
+- Sinxron: avval bir martalik import (dry-run + hisobot), keyin davriy ikki tomonlama. Ziddiyatda `updated_at` bo'yicha oxirgisi yutadi, ikkala qiymat `audit_log`'ga yoziladi.
+
+## 8. Tizimda yo'q (qilmang)
+
+- CRM'dan qo'ng'iroq qilish
+- Fayl yuklash
+- 1C va soliq.uz bilan avtomatik bog'lanish
+- To'lov qabul qilish
+- Mijozga SMS/Telegram xabar
+
+## 9. Zaxira va xavfsizlik
+
+- Har kuni DB zaxira nusxasi.
+- `audit_log` o'chirib bo'lmaydi (DB darajasida UPDATE/DELETE taqiqlanadi).
+- Parollar hash, JWT qisqa muddatli, HTTPS, maxfiy kalitlar `.env`da (git'ga kirmaydi).
+
+## 10. Hali ochiq masalalar (`TODO(tasdiqlash)`)
+
+1. Poruchenya JShDS muddat kuni.
+2. Dividend belgisini kim qo'yadi.
+3. "Qolgan hisobotlarni o'zimiz topshiramiz": hozircha faqat INPS buxgalterga vazifa (`creates_accountant_task`), qolganlari oylik jadvalda ko'rinadi. Tasdiqlansa bayroq o'zgartiriladi.
+4. JShDS/To'lov manbai/AOS/QQS muddati oy: jadvaldagi sarlavha (15.10, 20.10) bo'yicha joriy oyda deb olingan.

@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-feature-settings: 'cv11', 'ss01';
+    overflow-x: hidden;
+    /* Sahifaning o'ng chetidagi vertikal scrollbar ko'rinmaydi, aylantirish ishlaydi */
+    scrollbar-width: none;
+  }
+  html::-webkit-scrollbar {
+    display: none;
+  }
+  body {
+    @apply bg-page font-sans text-ink;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: theme('colors.brand.500');
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-500/40 ring-offset-1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}
+
+/* WinPro dizayn tizimidagi umumiy sinflar (my-winpro-admin/src/styles/globals.css) */
+@layer components {
+  .section-container {
+    @apply w-full rounded-md bg-white p-2 sm:p-4;
+  }
+
+  /* Jadvalli sahifa: ekran balandligi (header 56px + main padding), sahifa emas — faqat jadval aylanadi */
+  .page-fill {
+    @apply md:flex md:h-[calc(100dvh-56px-2rem)] md:flex-col;
+  }
+
+  /* Sidebar menyu elementlari */
+  .menu-item {
+    @apply relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors;
+  }
+  .menu-item-active {
+    @apply bg-brand-light text-brand-500 dark:text-brand-400;
+  }
+  .menu-item-inactive {
+    @apply text-gray-700 hover:bg-gray-100;
+  }
+  .menu-item-icon-active {
+    @apply text-brand-500 dark:text-brand-400;
+  }
+  .menu-item-icon-inactive {
+    @apply text-gray-500 group-hover:text-gray-700;
+  }
+  .menu-item-icon-size svg {
+    @apply !h-6 !w-6;
+  }
+  .menu-dropdown-badge {
+    @apply block rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  /* Faol tab ostidagi teal chiziq */
+  .border-button {
+    @apply after:absolute after:bottom-0 after:left-0 after:h-[3px] after:w-full after:rounded after:bg-brand-500 after:content-[''];
+  }
+
+  /* Jadval sarlavhasi: teal fon, oq matn (WinPro Table) */
+  .table-head {
+    @apply bg-brand-500 text-left text-sm font-semibold whitespace-nowrap text-on-brand;
+  }
+  .table-head th {
+    @apply bg-brand-500 font-semibold;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    @apply h-1.5 w-1.5;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply rounded-full;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-gray-200;
+  }
+}
+
+/* Tugma bosilganda to'lqin effekti (lib/ripple.ts) */
+.ripple {
+  @apply pointer-events-none absolute z-0 rounded-full;
+  transform: scale(0);
+  animation: ripple 600ms linear;
+  background-color: rgb(255 255 255 / 0.4);
+}
+@keyframes ripple {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+/* Skeleton */
+.all-skeleton {
+  @apply relative w-full overflow-hidden bg-skeleton;
+}
+.all-skeleton::after {
+  content: '';
+  @apply absolute inset-0 z-[1];
+  transform: translateX(-100%);
+  animation: skeleton-shine 1.2s infinite;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / 0.6), rgb(255 255 255 / 0));
+}
+@keyframes skeleton-shine {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* sonner toast — WinPro (react-hot-toast) ko'rinishiga yaqin */
+[data-sonner-toaster] [data-sonner-toast] {
+  @apply rounded-lg font-sans shadow-aesthetic;
+}

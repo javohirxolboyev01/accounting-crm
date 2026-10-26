@@ -1,0 +1,254 @@
+import crypto from 'node:crypto';
+import { Router } from 'express';
+import { z } from 'zod';
+import { me, requireAuth, requireLeader } from '../common/auth';
+import { audit, diff } from '../common/audit';
+import { AppError, notFound, parse } from '../common/errors';
+import { type Db, one, pool, q, tx } from '../db';
+
+// Sozlamalar: hamma o'qiydi, faqat rahbar yozadi. O'zgarishlar mavjud vazifalarga tegmaydi
+// (keyingi generatsiyadan kuchga kiradi).
+
+const REPORT = `id, code, name, name_ru AS "nameRu", frequency, due_day AS "dueDay", generation_months AS "generationMonths",
+  applies_to_aos AS "appliesToAos", applies_to_qqs AS "appliesToQqs", creates_accountant_task AS "createsAccountantTask",
+  requires_dividend_flag AS "requiresDividendFlag", sheet_aliases AS "sheetAliases", active, sort_order AS "sortOrder"`;
+const ROUTINE = `id, name, name_ru AS "nameRu", sort_order AS "sortOrder", active, report_type_id AS "reportTypeId",
+  is_free_text AS "isFreeText", effective_from AS "effectiveFrom"`;
+
+export const settingsRouter = Router();
+settingsRouter.use(requireAuth);
+
+const intId = z.coerce.number().int().positive();
+
+// ---------- Hisobot turlari ----------
+settingsRouter.get('/report-types', async (_req, res) => {
+  res.json(await q(pool, `SELECT ${REPORT} FROM report_type ORDER BY sort_order, id`));
+});
+
+settingsRouter.patch('/report-types/:id', requireLeader, async (req, res) => {
+  const u = me(req);
+  const id = parse(intId, req.params.id);
+  const body = parse(
+    z.object({
+      name: z.string().trim().min(1).max(200).optional(),
+      nameRu: z.string().trim().min(1).max(200).optional(),
+      dueDay: z.number().int().min(1).max(31).nullable().optional(),
+      generationMonths: z.array(z.number().int().min(1).max(12)).min(1).nullable().optional(),
+      appliesToAos: z.boolean().optional(),
+      appliesToQqs: z.boolean().optional(),
+      createsAccountantTask: z.boolean().optional(),
+      requiresDividendFlag: z.boolean().optional(),
+      sheetAliases: z.array(z.string().trim().min(2).max(50)).optional(),
+      active: z.boolean().optional(),
+      sortOrder: z.number().int().optional(),
+    }),
+    req.body,
+  );
+  const row = await tx(async (db) => {
+    const before = await one(db, `SELECT ${REPORT} FROM report_type WHERE id = $1 FOR UPDATE`, [id]);
+    if (!before) throw notFound('Hisobot turi');
+    const r = await one(
+      db,
+      `UPDATE report_type SET
+         name = coalesce($2, name), name_ru = coalesce($3, name_ru),
+         due_day = CASE WHEN $4 THEN $5::int ELSE due_day END,
+         generation_months = CASE WHEN $6 THEN $7::int[] ELSE generation_months END,
+         applies_to_aos = coalesce($8, applies_to_aos), applies_to_qqs = coalesce($9, applies_to_qqs),
+         creates_accountant_task = coalesce($10, creates_accountant_task),
+         requires_dividend_flag = coalesce($11, requires_dividend_flag),
+         sheet_aliases = coalesce($12, sheet_aliases),
+         active = coalesce($13, active), sort_order = coalesce($14, sort_order)
+       WHERE id = $1 RETURNING ${REPORT}`,
+      [
+        id,
+        body.name ?? null,
+        body.nameRu ?? null,
+        body.dueDay !== undefined,
+        body.dueDay ?? null,
+        body.generationMonths !== undefined,
+        body.generationMonths ?? null,
+        body.appliesToAos ?? null,
+        body.appliesToQqs ?? null,
+        body.createsAccountantTask ?? null,
+        body.requiresDividendFlag ?? null,
+        body.sheetAliases ? body.sheetAliases.map((a) => a.toUpperCase()) : null,
+        body.active ?? null,
+        body.sortOrder ?? null,
+      ],
+    );
+    const d = diff(before, body);
+    if (d.changed) await audit(db, { actorId: u.id, entity: 'report_type', entityId: id, action: 'UPDATE', before: d.before, after: d.after });
+    return r;
+  });
+  res.json(row);
+});
+
+// ---------- Oylik doimiy ishlar (maks. 10 faol, DB trigger) ----------
+settingsRouter.get('/routine-works', async (_req, res) => {
+  res.json(await q(pool, `SELECT ${ROUTINE} FROM routine_work_type ORDER BY active DESC, sort_order, id`));
+});
+
+async function activeRoutineCount(db: Db) {
+  return (await one<{ n: number }>(db, 'SELECT count(*) AS n FROM routine_work_type WHERE active'))!.n;
+}
+
+settingsRouter.post('/routine-works', requireLeader, async (req, res) => {
+  const u = me(req);
+  const body = parse(
+    z.object({ name: z.string().trim().min(1).max(200), nameRu: z.string().trim().max(200).optional(), isFreeText: z.boolean().default(false) }),
+    req.body,
+  );
+  const row = await tx(async (db) => {
+    if ((await activeRoutineCount(db)) >= 10) {
+      throw new AppError(409, 'ROUTINE_LIMIT', 'Faol oylik ishlar soni 10 tadan oshmasligi kerak', { max: 10 });
+    }
+    // effective_from standart: keyingi oyning 1-kuni (yangi ish keyingi oydan chiqadi)
+    const r = await one(
+      db,
+      `INSERT INTO routine_work_type (name, name_ru, is_free_text, sort_order)
+       VALUES ($1, $2, $3, coalesce((SELECT max(sort_order) + 1 FROM routine_work_type), 1)) RETURNING ${ROUTINE}`,
+      [body.name, body.nameRu || body.name, body.isFreeText],
+    );
+    await audit(db, { actorId: u.id, entity: 'routine_work_type', entityId: r.id, action: 'CREATE', after: r });
+    return r;
+  });
+  res.status(201).json(row);
+});
+
+settingsRouter.put('/routine-works/order', requireLeader, async (req, res) => {
+  const u = me(req);
+  const { ids } = parse(z.object({ ids: z.array(intId).min(1) }), req.body);
+  await tx(async (db) => {
+    for (const [i, id] of ids.entries()) {
+      await db.query('UPDATE routine_work_type SET sort_order = $2 WHERE id = $1', [id, i + 1]);
+    }
+    await audit(db, { actorId: u.id, entity: 'routine_work_type', entityId: null, action: 'REORDER', after: { ids } });
+  });
+  res.json(await q(pool, `SELECT ${ROUTINE} FROM routine_work_type ORDER BY active DESC, sort_order, id`));
+});
+
+settingsRouter.patch('/routine-works/:id', requireLeader, async (req, res) => {
+  const u = me(req);
+  const id = parse(intId, req.params.id);
+  const body = parse(
+    z.object({
+      name: z.string().trim().min(1).max(200).optional(),
+      nameRu: z.string().trim().min(1).max(200).optional(),
+      sortOrder: z.number().int().optional(),
+      active: z.boolean().optional(),
+      isFreeText: z.boolean().optional(),
+    }),
+    req.body,
+  );
+  const row = await tx(async (db) => {
+    const before = await one(db, `SELECT ${ROUTINE} FROM routine_work_type WHERE id = $1 FOR UPDATE`, [id]);
+    if (!before) throw notFound('Oylik ish');
+    if (body.active === true && !before.active && (await activeRoutineCount(db)) >= 10) {
+      throw new AppError(409, 'ROUTINE_LIMIT', 'Faol oylik ishlar soni 10 tadan oshmasligi kerak', { max: 10 });
+    }
+    const r = await one(
+      db,
+      `UPDATE routine_work_type SET name = coalesce($2, name), name_ru = coalesce($3, name_ru),
+         sort_order = coalesce($4, sort_order), active = coalesce($5, active), is_free_text = coalesce($6, is_free_text),
+         -- Qayta yoqilgan ish ham keyingi oydan chiqadi
+         effective_from = CASE WHEN $5 IS TRUE AND NOT active
+                               THEN (date_trunc('month', now()) + interval '1 month')::date ELSE effective_from END
+       WHERE id = $1 RETURNING ${ROUTINE}`,
+      [id, body.name ?? null, body.nameRu ?? null, body.sortOrder ?? null, body.active ?? null, body.isFreeText ?? null],
+    );
+    const d = diff(before, body);
+    if (d.changed) await audit(db, { actorId: u.id, entity: 'routine_work_type', entityId: id, action: 'UPDATE', before: d.before, after: d.after });
+    return r;
+  });
+  res.json(row);
+});
+
+// O'chirish = faolsizlantirish (mavjud vazifalar tarixda qoladi)
+settingsRouter.delete('/routine-works/:id', requireLeader, async (req, res) => {
+  const u = me(req);
+  const id = parse(intId, req.params.id);
+  await tx(async (db) => {
+    const r = await db.query('UPDATE routine_work_type SET active = false WHERE id = $1 AND active', [id]);
+    if (r.rowCount) await audit(db, { actorId: u.id, entity: 'routine_work_type', entityId: id, action: 'DEACTIVATE' });
+  });
+  res.status(204).end();
+});
+
+// ---------- Shoshilinch vazifa shablonlari ----------
+interface Template {
+  id: string;
+  text: string;
+}
+async function getTemplates(db: Db): Promise<Template[]> {
+  const r = await one<{ value: Template[] }>(db, `SELECT value FROM setting WHERE key = 'urgent_templates'`);
+  return Array.isArray(r?.value) ? r!.value : [];
+}
+async function saveTemplates(db: Db, list: Template[], actorId: number, action: string, before: unknown, after: unknown) {
+  await db.query(
+    `INSERT INTO setting (key, value) VALUES ('urgent_templates', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify(list)],
+  );
+  await audit(db, { actorId, entity: 'setting', entityId: 'urgent_templates', action, before, after });
+}
+
+settingsRouter.get('/urgent-templates', async (_req, res) => {
+  res.json(await getTemplates(pool));
+});
+
+settingsRouter.post('/urgent-templates', requireLeader, async (req, res) => {
+  const u = me(req);
+  const { text } = parse(z.object({ text: z.string().trim().min(1).max(500) }), req.body);
+  const t = await tx(async (db) => {
+    const list = await getTemplates(db);
+    const item = { id: crypto.randomUUID().slice(0, 8), text };
+    await saveTemplates(db, [...list, item], u.id, 'CREATE', null, item);
+    return item;
+  });
+  res.status(201).json(t);
+});
+
+settingsRouter.patch('/urgent-templates/:id', requireLeader, async (req, res) => {
+  const u = me(req);
+  const { text } = parse(z.object({ text: z.string().trim().min(1).max(500) }), req.body);
+  const t = await tx(async (db) => {
+    const list = await getTemplates(db);
+    const old = list.find((x) => x.id === req.params.id);
+    if (!old) throw notFound('Shablon');
+    const item = { ...old, text };
+    await saveTemplates(db, list.map((x) => (x.id === old.id ? item : x)), u.id, 'UPDATE', old, item);
+    return item;
+  });
+  res.json(t);
+});
+
+settingsRouter.delete('/urgent-templates/:id', requireLeader, async (req, res) => {
+  const u = me(req);
+  await tx(async (db) => {
+    const list = await getTemplates(db);
+    const old = list.find((x) => x.id === req.params.id);
+    if (!old) throw notFound('Shablon');
+    await saveTemplates(db, list.filter((x) => x.id !== old.id), u.id, 'DELETE', old, null);
+  });
+  res.status(204).end();
+});
+
+// ---------- Umumiy ----------
+settingsRouter.get('/general', async (_req, res) => {
+  const r = await one<{ value: string }>(pool, `SELECT value FROM setting WHERE key = 'task_due_time'`);
+  res.json({ taskDueTime: r?.value ?? '18:00' });
+});
+
+settingsRouter.put('/general', requireLeader, async (req, res) => {
+  const u = me(req);
+  const { taskDueTime } = parse(z.object({ taskDueTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }), req.body);
+  await tx(async (db) => {
+    const before = await one(db, `SELECT value FROM setting WHERE key = 'task_due_time'`);
+    await db.query(
+      `INSERT INTO setting (key, value) VALUES ('task_due_time', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify(taskDueTime)],
+    );
+    await audit(db, { actorId: u.id, entity: 'setting', entityId: 'task_due_time', action: 'UPDATE', before: { taskDueTime: before?.value ?? null }, after: { taskDueTime } });
+  });
+  res.json({ taskDueTime });
+});
