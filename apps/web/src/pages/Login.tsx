@@ -2,6 +2,7 @@ import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Logo } from '@/components/Logo';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/input';
 import { useAuth } from '@/lib/auth';
@@ -132,9 +133,7 @@ export default function Login() {
           <div className="relative z-[1] flex items-center justify-center">
             <GridShape />
             <div className="flex max-w-xs flex-col items-center text-center">
-              <div className="mb-4 flex items-center gap-3 text-2xl font-semibold text-on-brand">
-                <img src="/favicon.svg" alt="" className="h-12 w-12 rounded-xl" /> {t('app.name')}
-              </div>
+              <Logo className="mb-5 h-24 w-auto text-on-brand" />
               <p className="text-[#9ca3af]">{t('login.tagline')}</p>
             </div>
           </div>

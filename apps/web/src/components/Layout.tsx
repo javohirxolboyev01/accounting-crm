@@ -27,6 +27,7 @@ import { cn } from '@/lib/cn';
 import { useServerEvents } from '@/lib/events';
 import { useTheme } from '@/lib/theme';
 import type { AppNotification, Lang } from '@/lib/types';
+import { Logo } from './Logo';
 import { NotificationsDrawer, notificationText } from './NotificationsDrawer';
 import { TaskPanel } from './TaskPanel';
 import { UrgentDialog } from './UrgentDialog';
@@ -150,11 +151,11 @@ export function Layout() {
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className={cn('hidden items-center py-4 xl:flex', wide ? 'justify-between' : 'justify-center')}>
+        {/* Balandligi va pastki chizig'i header bilan bir xil: logo qatori header bilan bitta chiziqda turadi */}
+        <div className={cn('hidden h-14 shrink-0 items-center border-b border-gray-200 xl:flex', wide ? '-mx-3.5 justify-between pl-5 pr-3.5' : '-mx-2 justify-center px-2')}>
           {wide && (
-            <Link to="/" title={t('nav.home')} className="flex min-w-0 items-center gap-2.5 font-semibold tracking-tight text-foreground">
-              <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-lg" />
-              <span className="truncate text-base">{t('app.name')}</span>
+            <Link to="/" title={t('nav.home')} className="flex min-w-0 items-center rounded-md transition-opacity hover:opacity-80">
+              <Logo variant="row" className="h-8 w-auto" />
             </Link>
           )}
           <button type="button" title={t(wide ? 'nav.collapse' : 'nav.openMenu')} aria-label={t(wide ? 'nav.collapse' : 'nav.openMenu')} onClick={toggleSidebar} className="menu-item menu-item-inactive group h-11 w-auto cursor-pointer">
@@ -225,8 +226,8 @@ export function Layout() {
           <button type="button" onClick={() => setMobileOpen((v) => !v)} aria-label={t('nav.menu')} className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg text-gray-500 xl:hidden">
             {mobileOpen ? <X className="h-6 w-6" /> : <AlignJustify className="h-6 w-6" />}
           </button>
-          <Link to="/" className="flex items-center gap-2 font-semibold text-foreground xl:hidden">
-            <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-lg" /> <span className="hidden sm:inline">{t('app.name')}</span>
+          <Link to="/" title={t('nav.home')} className="mr-2 flex items-center xl:hidden">
+            <Logo variant="row" className="h-7 w-auto" />
           </Link>
           {isLeader && (
             <button
