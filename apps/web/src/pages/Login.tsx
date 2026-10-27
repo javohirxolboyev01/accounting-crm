@@ -132,9 +132,9 @@ export default function Login() {
         <aside className="hidden h-full w-full items-center bg-navy dark:bg-[#ffffff0d] lg:grid lg:w-1/2">
           <div className="relative z-[1] flex items-center justify-center">
             <GridShape />
-            <div className="flex max-w-xs flex-col items-center text-center">
-              <Logo className="mb-5 h-24 w-auto text-on-brand" />
-              <p className="text-[#9ca3af]">{t('login.tagline')}</p>
+            <div className="flex flex-col items-center px-6 text-center">
+              <Logo variant="row" className="mb-6 h-20 w-auto text-on-brand xl:h-24" />
+              <p className="whitespace-nowrap text-[#9ca3af]">{t('login.tagline')}</p>
             </div>
           </div>
         </aside>
