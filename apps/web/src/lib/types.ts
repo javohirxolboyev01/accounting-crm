@@ -266,6 +266,14 @@ export interface ImportReport {
   summary: { total: number; created: number; updated: number; unchanged: number; skipped: number; review: number; cellsDone: number };
   rows: { row: number; stir: string; name: string; action: 'NEW' | 'UPDATED' | 'UNCHANGED' | 'SKIPPED'; changes: string[]; review: string[] }[];
   csv: string;
+  alreadyImported: PreviousImport | null;
+}
+
+/** Shu fayl (mazmuni bo'yicha) avval import qilingan bo'lsa */
+export interface PreviousImport {
+  fileName: string;
+  importedAt: string;
+  importedBy: string | null;
 }
 
 export interface SheetsStatus {

@@ -1,8 +1,10 @@
+import ExcelJS from 'exceljs';
+import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dryTx, tx } from '../src/db';
 import { importTable } from '../src/modules/sheets/importer';
 import { type SheetAdapter, type SheetUpdate, syncState } from '../src/modules/sheets/sync';
-import { one, pool, q, resetDb, seedTeam } from './helpers';
+import { app, one, pool, q, resetDb, seedTeam, token } from './helpers';
 
 const HEADER = ['№', 'STIR', 'Korxona nomi', 'Soliq turi', 'JSHDS 15.10.2026', "To'lov manbai 15.10.2026", 'AOS 15.10.2026',
   'QQS 20.10.2026', 'FOYDA 20.10.2026', 'INPS', 'Poruchenya JSHDS', 'Қилиниши лозим бўлган ишлар'];
@@ -160,5 +162,37 @@ describe('Sheets ikki tomonlama sinxron', () => {
     expect(mem.writes.slice(before).some((w) => w.col === col('JSHDS'))).toBe(false);
     const e = await one(pool, `SELECT message, raw_value FROM sheet_sync_error WHERE kind = 'SYNC' AND raw_value = 'ha'`);
     expect(e).toBeTruthy();
+  });
+});
+
+describe('Sheets import: bir xil faylni qayta yuklash', () => {
+  let tok: string;
+  let xlsx: Buffer;
+  beforeAll(async () => {
+    await resetDb();
+    await seedTeam();
+    tok = await token('leader');
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('Oktyabr').addRows(sheet());
+    xlsx = Buffer.from(await wb.xlsx.writeBuffer());
+  });
+  const upload = (dryRun: boolean, name = 'hisobot.xlsx') =>
+    request(app).post(`/api/sheets/import?dryRun=${dryRun}`).set('Authorization', `Bearer ${tok}`).attach('file', xlsx, name);
+
+  it('birinchi import yoziladi; qayta yuklash (boshqa nom bilan ham) 409, dry-run ogohlantiradi', async () => {
+    const first = await upload(false);
+    expect(first.status).toBe(200);
+    expect(first.body.summary.created).toBe(5);
+    expect(first.body.alreadyImported).toBeNull();
+
+    const again = await upload(false, 'nusxa.xlsx');
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe('FILE_ALREADY_IMPORTED');
+    expect(again.body.details).toMatchObject({ fileName: 'hisobot.xlsx', importedBy: 'Rahbar' });
+
+    const dry = await upload(true);
+    expect(dry.status).toBe(200);
+    expect(dry.body.alreadyImported).toMatchObject({ fileName: 'hisobot.xlsx' });
+    expect((await one(pool, 'SELECT count(*)::int AS n FROM sheet_import_file')).n).toBe(1);
   });
 });

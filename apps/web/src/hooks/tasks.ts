@@ -57,7 +57,7 @@ export function useMarkDone() {
               .post(`/tasks/${task.id}/undo-done`)
               .then(() => {
                 invalidateTasks(qc);
-                toast(t('task.undone'));
+                toast.info(t('task.undone'));
               })
               .catch((e) => toast.error(errorText(e, t)));
           },

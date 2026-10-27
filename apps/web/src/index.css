@@ -130,7 +130,58 @@
   }
 }
 
-/* sonner toast — WinPro (react-hot-toast) ko'rinishiga yaqin */
-[data-sonner-toaster] [data-sonner-toast] {
-  @apply rounded-lg font-sans shadow-aesthetic;
+/* sonner toast — oddiy oq karta, chegarasiz; faqat ikonka tur rangida */
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] {
+  --toast-rgb: var(--c-brand);
+  @apply gap-2.5 rounded-lg border-0 bg-white py-3 pl-4 pr-9 font-sans text-ink shadow-aesthetic;
+}
+[data-sonner-toaster] [data-sonner-toast][data-type='success'] {
+  --toast-rgb: var(--c-green-600);
+}
+[data-sonner-toaster] [data-sonner-toast][data-type='error'] {
+  --toast-rgb: var(--c-red-600);
+}
+[data-sonner-toaster] [data-sonner-toast][data-type='warning'] {
+  --toast-rgb: var(--c-amber-500);
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-icon] {
+  @apply m-0 h-5 w-5;
+  color: rgb(var(--toast-rgb));
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-icon] svg {
+  @apply m-0 h-5 w-5;
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-title] {
+  @apply text-sm font-medium;
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-description] {
+  @apply text-xs text-gray-500;
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button] {
+  @apply left-auto right-2 top-1/2 h-6 w-6 -translate-y-1/2 rounded-md border-0 bg-transparent text-gray-400;
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button]:hover {
+  @apply bg-gray-100 text-gray-700;
+}
+/* Amal tugmasi ("Bekor qilish", "Ochish"): holat rangida, yumshoq fon */
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-button] {
+  @apply ml-2 h-7 shrink-0 rounded-md px-3 text-xs font-semibold transition-colors;
+  color: rgb(var(--toast-rgb));
+  background: rgb(var(--toast-rgb) / 0.1);
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-button]:hover {
+  background: rgb(var(--toast-rgb) / 0.18);
+}
+/* Shoshilinch vazifa: to'liq qizil, yopilmaguncha turadi */
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'].toast-urgent {
+  @apply bg-red-600 text-on-brand;
+}
+[data-sonner-toaster] [data-sonner-toast].toast-urgent [data-icon] {
+  @apply text-on-brand;
+}
+[data-sonner-toaster] [data-sonner-toast].toast-urgent [data-close-button] {
+  @apply text-on-brand/80 hover:bg-white/20 hover:text-on-brand;
+}
+[data-sonner-toaster] [data-sonner-toast].toast-urgent [data-button] {
+  @apply bg-white text-red-600 hover:bg-white/90;
 }

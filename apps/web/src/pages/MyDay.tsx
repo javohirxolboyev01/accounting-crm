@@ -9,6 +9,7 @@ import { QueryState } from '@/components/ui/states';
 import { useChangeStatus, useMarkDone } from '@/hooks/tasks';
 import { useOpenTask } from '@/hooks/outlet';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import type { MyDay as MyDayData, Task, TaskStatus } from '@/lib/types';
 
@@ -28,6 +29,7 @@ function Group({ title, icon, tasks, tone, onOpen, onDone }: { title: string; ic
 
 export default function MyDay() {
   const { t } = useTranslation();
+  const { isLeader } = useAuth();
   const openTask = useOpenTask();
   const done = useMarkDone();
   const changeStatus = useChangeStatus();
@@ -38,7 +40,7 @@ export default function MyDay() {
 
   return (
     <div>
-      <PageHeader title={t('myDay.title')} breadcrumb={false} />
+      <PageHeader title={isLeader ? t('myDay.title') : t('myDay.myTasks')} breadcrumb={false} />
       <QueryState q={q}>
         {d && (
           <div className="space-y-4">

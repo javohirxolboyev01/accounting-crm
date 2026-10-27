@@ -4,6 +4,7 @@ import { cn } from '@/lib/cn';
 import { fmtShortDue } from '@/lib/time';
 import type { Task } from '@/lib/types';
 import { taskTitle, taskTone, toneClasses } from '@/hooks/tasks';
+import { SHOW_CHECKLIST } from './TaskPanel';
 import { Badge } from './ui/card';
 
 export function TaskCard({
@@ -42,7 +43,7 @@ export function TaskCard({
             {tone === 'overdue' ? <AlertCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
             {task.dueAt ? fmtShortDue(task.dueAt) : t('task.noDue')}
           </span>
-          {task.checklistTotal > 0 && (
+          {SHOW_CHECKLIST && task.checklistTotal > 0 && (
             <span>
               ☑ {task.checklistDone}/{task.checklistTotal}
             </span>

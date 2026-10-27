@@ -18,9 +18,9 @@ import type { CellState, Grid } from '@/lib/types';
 
 const CELL: Record<CellState, { sym: string; cls: string }> = {
   '1': { sym: '✓', cls: 'bg-done-bg text-done font-semibold' },
-  '0': { sym: '○', cls: 'text-gray-500 hover:bg-blue-50' },
+  '0': { sym: '○', cls: 'font-semibold text-gray-600 hover:bg-blue-50 dark:text-on-brand' },
   '!': { sym: '!', cls: 'bg-overdue-bg text-overdue font-bold hover:bg-red-200' },
-  X: { sym: '—', cls: 'bg-gray-100 text-gray-400' },
+  X: { sym: '—', cls: 'bg-gray-100 font-semibold text-gray-600 dark:text-on-brand' },
 };
 
 export default function Monthly() {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import { Router } from 'express';
 import multer from 'multer';
@@ -50,7 +51,17 @@ export async function syncAllEnabled() {
 export const sheetsRouter = Router();
 sheetsRouter.use(requireAuth, requireLeader);
 
-/** Import: xlsx fayl (multipart "file") yoki Google Sheet (JSON: spreadsheetId, sheetTitle). dryRun=true standart. */
+interface PreviousImport {
+  fileName: string;
+  importedAt: string;
+  importedBy: string | null;
+}
+
+/**
+ * Import: xlsx fayl (multipart "file") yoki Google Sheet (JSON: spreadsheetId, sheetTitle). dryRun=true standart.
+ * Fayl mazmuni (SHA-256) avval import qilingan bo'lsa: dry-run javobida `alreadyImported`, haqiqiy importda 409
+ * FILE_ALREADY_IMPORTED — bir xil faylni qayta yozish hech narsa qo'shmaydi, faqat chalg'itadi.
+ */
 sheetsRouter.post('/import', upload.single('file'), async (req, res) => {
   const u = me(req);
   const f = parse(
@@ -61,19 +72,41 @@ sheetsRouter.post('/import', upload.single('file'), async (req, res) => {
     }),
     req.query,
   );
+  const dryRun = f.dryRun === 'true';
   let rows: unknown[][];
+  let fileHash: string | null = null;
+  let previous: PreviousImport | undefined;
   if (req.file) {
     if (!/\.xlsx$/i.test(req.file.originalname)) throw new AppError(400, 'BAD_FILE', 'Faqat .xlsx fayl');
+    fileHash = createHash('sha256').update(req.file.buffer).digest('hex');
+    previous = await one<PreviousImport>(
+      pool,
+      `SELECT f.file_name AS "fileName", f.imported_at AS "importedAt", u.full_name AS "importedBy"
+       FROM sheet_import_file f LEFT JOIN app_user u ON u.id = f.imported_by WHERE f.file_hash = $1`,
+      [fileHash],
+    );
+    if (previous && !dryRun) throw new AppError(409, 'FILE_ALREADY_IMPORTED', 'Bu fayl allaqachon import qilingan', previous);
     rows = await xlsxToRows(req.file.buffer, f.sheet);
   } else {
     const body = parse(z.object({ spreadsheetId: z.string().min(10), sheetTitle: z.string().min(1) }), req.body);
     if (!googleConfigured()) throw new AppError(400, 'GOOGLE_NOT_CONFIGURED', 'Google service account sozlanmagan');
     rows = (await (await googleAdapter(body.spreadsheetId, body.sheetTitle)).read()).values;
   }
-  const dryRun = f.dryRun === 'true';
   const opts = { period: f.month ? periodFromMonth(f.month) : undefined, actorId: u.id, dryRun };
-  const report = dryRun ? await dryTx((db) => importTable(db, rows, opts)) : await tx((db) => importTable(db, rows, opts));
-  res.json(report);
+  const report = dryRun
+    ? await dryTx((db) => importTable(db, rows, opts))
+    : await tx(async (db) => {
+        const r = await importTable(db, rows, opts);
+        if (fileHash) {
+          await db.query(
+            `INSERT INTO sheet_import_file (file_hash, file_name, period, imported_by, summary) VALUES ($1, $2, $3, $4, $5)`,
+            // multer nomni latin1 deb o'qiydi: kirill/o'zbekcha nomlar buzilmasin
+            [fileHash, Buffer.from(req.file!.originalname, 'latin1').toString('utf8'), `${r.period}-01`, u.id, r.summary],
+          );
+        }
+        return r;
+      });
+  res.json({ ...report, alreadyImported: previous ?? null });
 });
 
 sheetsRouter.get('/status', async (_req, res) => {

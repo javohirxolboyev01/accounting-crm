@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, RefreshCw, Upload } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, DatabaseZap, Download, Eye, FileSpreadsheet, RefreshCw, ShieldCheck, Upload, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -7,14 +7,15 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge, Card, CardHeader, PageHeader } from '@/components/ui/card';
 import { MonthPicker } from '@/components/ui/date-picker';
+import { Dialog } from '@/components/ui/dialog';
 import { Field, Input } from '@/components/ui/input';
 import { Empty, QueryState } from '@/components/ui/states';
 import { invalidateTasks } from '@/hooks/tasks';
-import { api, qs } from '@/lib/api';
+import { ApiError, api, qs } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { errorText } from '@/lib/errors';
 import { currentMonth, fmtDateTime } from '@/lib/time';
-import type { ImportReport, ReviewItem, SheetsStatus } from '@/lib/types';
+import type { ImportReport, PreviousImport, ReviewItem, SheetsStatus } from '@/lib/types';
 
 const actionCls = {
   NEW: 'border-green-300 bg-green-50 text-green-700',
@@ -22,6 +23,92 @@ const actionCls = {
   UNCHANGED: 'border-gray-200 text-gray-500',
   SKIPPED: 'border-red-300 bg-red-50 text-red-700',
 };
+
+type RowFilter = 'ALL' | 'NEW' | 'UPDATED' | 'UNCHANGED' | 'SKIPPED' | 'REVIEW';
+
+const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
+/** 1 → 2 → 3 qadamlar: fayl tanlash, tekshirish (bazaga yozilmaydi), CRM'ga yuklash */
+function ImportSteps({ step }: { step: 1 | 2 | 3 | 4 }) {
+  const { t } = useTranslation();
+  const steps = [t('sheets.step.choose'), t('sheets.step.preview'), t('sheets.step.apply')];
+  return (
+    <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      {steps.map((label, i) => {
+        const n = i + 1;
+        const done = step > n;
+        const active = step === n;
+        return (
+          <li key={label} className="flex items-center gap-2">
+            {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-gray-400" aria-hidden />}
+            <span
+              className={cn(
+                'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold',
+                done ? 'bg-green-600 text-on-brand' : active ? 'bg-brand-500 text-on-brand' : 'bg-gray-100 text-gray-500',
+              )}
+            >
+              {done ? <Check className="h-3 w-3" /> : n}
+            </span>
+            <span className={cn(active ? 'font-medium text-gray-900' : 'text-gray-500')}>{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Native "Choose File" o'rniga: bosib tanlash yoki sudrab tashlash */
+function FileDrop({ file, onChange }: { file: File | null; onChange: (f: File | null) => void }) {
+  const { t } = useTranslation();
+  const [over, setOver] = useState(false);
+  if (file) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2.5 dark:border-brand-800 dark:bg-brand-950/30">
+        <FileSpreadsheet className="h-8 w-8 shrink-0 text-green-600" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-gray-900">{file.name}</div>
+          <div className="text-xs text-gray-500">{fmtSize(file.size)}</div>
+        </div>
+        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onChange(null)} aria-label={t('sheets.removeFile')} title={t('sheets.removeFile')}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <label
+      className={cn(
+        'flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 transition-colors',
+        over ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
+      )}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) onChange(f);
+      }}
+    >
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 dark:bg-brand-950 dark:text-brand-300">
+        <Upload className="h-4 w-4" aria-hidden />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-gray-900">{t('sheets.chooseFile')}</span>
+        <span className="block text-xs text-gray-500">{t('sheets.fileHint')}</span>
+      </span>
+      <input
+        type="file"
+        accept=".xlsx"
+        className="sr-only"
+        onChange={(e) => {
+          onChange(e.target.files?.[0] ?? null);
+          e.target.value = '';
+        }}
+      />
+    </label>
+  );
+}
 
 function ImportCard() {
   const { t } = useTranslation();
@@ -31,6 +118,17 @@ function ImportCard() {
   const [google, setGoogle] = useState({ spreadsheetId: '', sheetTitle: '' });
   const [month, setMonth] = useState('');
   const [report, setReport] = useState<ImportReport | null>(null);
+  const [filter, setFilter] = useState<RowFilter>('ALL');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Kiritilgan narsa o'zgarsa eski natija endi unga tegishli emas
+  const resetReport = () => { setReport(null); setFilter('ALL'); };
+
+  const warnDuplicate = (p: PreviousImport) =>
+    toast.warning(t('sheets.alreadyImported'), {
+      description: t('sheets.alreadyImportedDesc', { name: p.fileName, at: fmtDateTime(p.importedAt), by: p.importedBy ?? '—' }),
+      duration: 8000,
+    });
 
   const run = useMutation({
     mutationFn: async (dryRun: boolean) => {
@@ -44,13 +142,19 @@ function ImportCard() {
     },
     onSuccess: (r) => {
       setReport(r);
+      setFilter('ALL');
+      if (r.alreadyImported) warnDuplicate(r.alreadyImported);
       if (!r.dryRun) {
         toast.success(t('sheets.imported', { created: r.summary.created, updated: r.summary.updated }));
+        setFile(null);
         invalidateTasks(qc);
         void qc.invalidateQueries({ queryKey: ['sheets'] });
       }
     },
-    onError: (e) => toast.error(errorText(e, t)),
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'FILE_ALREADY_IMPORTED') warnDuplicate(e.details as PreviousImport);
+      else toast.error(errorText(e, t));
+    },
   });
 
   const downloadCsv = () => {
@@ -61,53 +165,134 @@ function ImportCard() {
     URL.revokeObjectURL(url);
   };
   const ready = source === 'file' ? !!file : !!google.spreadsheetId && !!google.sheetTitle;
+  const previewed = !!report?.dryRun;
+  const duplicate = !!report?.alreadyImported;
+  const step = report && !report.dryRun ? 4 : previewed ? 3 : ready ? 2 : 1;
+  // Tekshirmasdan yuklashda bir marta so'raladi: rahbar nima yozilishini ko'rmagan
+  const apply = () => (previewed ? run.mutate(false) : setConfirmOpen(true));
+
+  const s = report?.summary;
+  const tiles: { key: RowFilter; label: string; value: number; cls: string }[] = s
+    ? [
+        { key: 'ALL', label: t('common.total'), value: s.total, cls: 'text-gray-900' },
+        { key: 'NEW', label: t('sheets.new'), value: s.created, cls: 'text-green-700' },
+        { key: 'UPDATED', label: t('sheets.updated'), value: s.updated, cls: 'text-blue-700' },
+        { key: 'UNCHANGED', label: t('sheets.unchanged'), value: s.unchanged, cls: 'text-gray-600' },
+        { key: 'SKIPPED', label: t('sheets.skipped'), value: s.skipped, cls: 'text-red-700' },
+        { key: 'REVIEW', label: t('sheets.review'), value: s.review, cls: 'text-amber-700' },
+      ]
+    : [];
+  const rows = (report?.rows ?? []).filter((r) =>
+    filter === 'ALL' ? true : filter === 'REVIEW' ? r.review.length > 0 : r.action === filter,
+  );
 
   return (
     <Card>
       <CardHeader title={t('sheets.import')} />
-      <div className="space-y-4 p-4 text-sm">
+      <div className="space-y-5 px-4 pb-4 text-sm">
+        <ImportSteps step={step} />
+
         <div className="flex gap-4">
-          <label className="flex items-center gap-2"><input type="radio" checked={source === 'file'} onChange={() => setSource('file')} /> {t('sheets.fromFile')}</label>
-          <label className="flex items-center gap-2"><input type="radio" checked={source === 'google'} onChange={() => setSource('google')} /> Google Sheets</label>
+          <label className="flex items-center gap-2"><input type="radio" className="accent-brand-500" checked={source === 'file'} onChange={() => { setSource('file'); resetReport(); }} /> {t('sheets.fromFile')}</label>
+          <label className="flex items-center gap-2"><input type="radio" className="accent-brand-500" checked={source === 'google'} onChange={() => { setSource('google'); resetReport(); }} /> Google Sheets</label>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {source === 'file' ? (
-            <Field label={t('sheets.file')}><Input type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setReport(null); }} /></Field>
+            <div className="lg:col-span-2">
+              <Field label={t('sheets.file')}><FileDrop file={file} onChange={(f) => { setFile(f); resetReport(); }} /></Field>
+            </div>
           ) : (
             <>
-              <Field label={t('sheets.spreadsheetId')}><Input value={google.spreadsheetId} onChange={(e) => setGoogle({ ...google, spreadsheetId: e.target.value })} /></Field>
-              <Field label={t('sheets.sheetTitle')}><Input value={google.sheetTitle} onChange={(e) => setGoogle({ ...google, sheetTitle: e.target.value })} /></Field>
+              <Field label={t('sheets.spreadsheetId')}><Input value={google.spreadsheetId} onChange={(e) => { setGoogle({ ...google, spreadsheetId: e.target.value }); resetReport(); }} /></Field>
+              <Field label={t('sheets.sheetTitle')}><Input value={google.sheetTitle} onChange={(e) => { setGoogle({ ...google, sheetTitle: e.target.value }); resetReport(); }} /></Field>
             </>
           )}
-          <Field label={t('sheets.period')} hint={t('sheets.periodHint')}><MonthPicker value={month} onChange={setMonth} /></Field>
+          <Field label={t('sheets.period')} hint={t('sheets.periodHint')}><MonthPicker value={month} onChange={(v) => { setMonth(v); resetReport(); }} /></Field>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!ready || run.isPending} onClick={() => run.mutate(true)}><Upload className="h-4 w-4" /> {t('sheets.dryRun')}</Button>
-          <Button disabled={!ready || !report?.dryRun || run.isPending} onClick={() => run.mutate(false)}>{t('sheets.applyImport')}</Button>
-          {report && <Button variant="ghost" onClick={downloadCsv}><Download className="h-4 w-4" /> CSV</Button>}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-gray-200 p-3">
+            <Button variant="outline" className="w-full" disabled={!ready || run.isPending} loading={run.isPending && run.variables === true} onClick={() => run.mutate(true)}>
+              <Eye className="h-4 w-4" /> {t('sheets.dryRun')}
+            </Button>
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-500">
+              <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden /> {t('sheets.dryRunHint')}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-3">
+            <Button className="w-full" disabled={!ready || duplicate || run.isPending} loading={run.isPending && run.variables === false} onClick={apply}>
+              <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
+            </Button>
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-500">
+              <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden /> {t('sheets.applyHint')}
+            </p>
+          </div>
         </div>
-        {report && (
+
+        {report && s && (
           <div className="space-y-3">
-            <div className={cn('rounded-md border p-3', report.dryRun ? 'border-amber-300 bg-amber-50' : 'border-green-300 bg-green-50')}>
-              <b>{report.dryRun ? t('sheets.dryRunResult') : t('sheets.importResult')}</b> · {t('sheets.period')}: {report.period}
-              <div className="mt-1 flex flex-wrap gap-x-4 text-xs">
-                <span>{t('common.total')}: {report.summary.total}</span>
-                <span className="text-green-700">{t('sheets.new')}: {report.summary.created}</span>
-                <span className="text-blue-700">{t('sheets.updated')}: {report.summary.updated}</span>
-                <span>{t('sheets.unchanged')}: {report.summary.unchanged}</span>
-                <span className="text-red-700">{t('sheets.skipped')}: {report.summary.skipped}</span>
-                <span className="text-amber-700">{t('sheets.review')}: {report.summary.review}</span>
-                <span>{t('sheets.cellsDone')}: {report.summary.cellsDone}</span>
+            {report.dryRun ? (
+              duplicate ? (
+                <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+                  <div>
+                    <div className="font-semibold">{t('sheets.alreadyImported')}</div>
+                    <div className="text-xs">{t('sheets.alreadyImportedDesc', { name: report.alreadyImported!.fileName, at: fmtDateTime(report.alreadyImported!.importedAt), by: report.alreadyImported!.importedBy ?? '—' })}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-800 dark:bg-brand-950/40">
+                  <Eye className="h-5 w-5 shrink-0 text-brand-600 dark:text-brand-300" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-gray-900">{t('sheets.dryRunResult')} · {report.period}</div>
+                    <div className="text-xs text-gray-600">{t('sheets.dryRunNext')}</div>
+                  </div>
+                  <Button disabled={run.isPending} loading={run.isPending && run.variables === false} onClick={() => run.mutate(false)}>
+                    <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
+                  </Button>
+                </div>
+              )
+            ) : (
+              <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 p-3 text-green-800">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+                <div>
+                  <div className="font-semibold">{t('sheets.importResult')} · {report.period}</div>
+                  <div className="text-xs">{t('sheets.importDone', { cells: s.cellsDone, review: s.review })}</div>
+                </div>
               </div>
-              <div className="mt-1 text-xs text-gray-600">{t('sheets.columns')}: {report.columns.map((c) => c.code).join(', ')}</div>
+            )}
+
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+              {tiles.map((x) => (
+                <button
+                  key={x.key}
+                  type="button"
+                  onClick={() => setFilter(x.key)}
+                  className={cn(
+                    'rounded-lg border px-3 py-2 text-left transition-colors',
+                    filter === x.key ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40' : 'border-gray-200 hover:bg-gray-50',
+                  )}
+                >
+                  <div className={cn('text-lg font-semibold tabular-nums', x.cls)}>{x.value}</div>
+                  <div className="truncate text-xs text-gray-500">{x.label}</div>
+                </button>
+              ))}
             </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+              <span>{t('sheets.columns')}: {report.columns.map((c) => c.code).join(', ')} · {t('sheets.cellsDone')}: {s.cellsDone}</span>
+              <Button size="sm" variant="ghost" onClick={downloadCsv}><Download className="h-4 w-4" /> CSV</Button>
+            </div>
+
             <div className="max-h-96 overflow-auto rounded-md border">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 table-head">
                   <tr><th className="px-3 py-1.5">#</th><th className="px-3 py-1.5">{t('clients.stir')}</th><th className="px-3 py-1.5">{t('clients.name')}</th><th className="px-3 py-1.5">{t('sheets.action')}</th><th className="px-3 py-1.5">{t('sheets.reviewNotes')}</th></tr>
                 </thead>
                 <tbody>
-                  {report.rows.map((r) => (
+                  {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">{t('sheets.noRows')}</td></tr>}
+                  {rows.map((r) => (
                     <tr key={r.row} className={cn('border-t', r.review.length && 'bg-amber-50/60')}>
                       <td className="px-3 py-1.5">{r.row}</td>
                       <td className="px-3 py-1.5 font-mono">{r.stir}</td>
@@ -122,6 +307,20 @@ function ImportCard() {
           </div>
         )}
       </div>
+
+      <Dialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={t('sheets.confirmTitle')}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => { setConfirmOpen(false); run.mutate(true); }}><Eye className="h-4 w-4" /> {t('sheets.dryRun')}</Button>
+            <Button onClick={() => { setConfirmOpen(false); run.mutate(false); }}><DatabaseZap className="h-4 w-4" /> {t('sheets.confirmApply')}</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t('sheets.confirmText')}</p>
+      </Dialog>
     </Card>
   );
 }

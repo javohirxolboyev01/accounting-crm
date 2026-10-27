@@ -16,6 +16,11 @@ import { Drawer } from './ui/dialog';
 import { Input, Textarea } from './ui/input';
 import { QueryState } from './ui/states';
 
+/** Checklist hozircha yashirin (ishlatilmayapti); kerak bo'lsa true qilinadi — server API va ma'lumotlar joyida. */
+export const SHOW_CHECKLIST = false;
+/** Izoh ham hozircha yashirin; faqat "Boshqa ishlar" (erkin matn, CLAUDE.md 6.2/7) vazifasida ko'rinadi — u yerda ish matni shu maydonga yoziladi. */
+const SHOW_NOTE = false;
+
 function LiveTimer({ startedAt, base }: { startedAt: string | null; base: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -115,6 +120,7 @@ export function TaskPanel({ taskId, onClose }: { taskId: number | null; onClose:
               )}
             </div>
 
+            {SHOW_CHECKLIST && (
             <section>
               <h3 className="mb-1.5 text-sm font-semibold text-foreground">{t('task.checklist')} ({task.checklist.filter((c) => c.done).length}/{task.checklist.length})</h3>
               <ul className="space-y-1">
@@ -133,7 +139,9 @@ export function TaskPanel({ taskId, onClose }: { taskId: number | null; onClose:
                 <Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" aria-label={t('common.add')}><Plus className="h-4 w-4" /></Button>
               </form>
             </section>
+            )}
 
+            {(SHOW_NOTE || task.isFreeText) && (
             <section>
               <h3 className="mb-1.5 text-sm font-semibold text-foreground">{t('task.note')}</h3>
               {task.isFreeText && <p className="mb-2 text-xs text-gray-500">{t('task.freeTextHint')}</p>}
@@ -142,6 +150,7 @@ export function TaskPanel({ taskId, onClose }: { taskId: number | null; onClose:
                 {t('common.save')}
               </Button>
             </section>
+            )}
 
             {task.timeEntries.length > 0 && (
               <section>

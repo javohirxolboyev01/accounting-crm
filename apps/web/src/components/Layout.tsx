@@ -99,7 +99,7 @@ export function Layout() {
       // Shoshilinch: ekranda qizil xabar, foydalanuvchi o'zi yopmaguncha turadi
       toast.error(text, {
         duration: Infinity,
-        className: '!border-red-500 !bg-red-600 !text-on-brand',
+        className: 'toast-urgent',
         action: n.taskId ? { label: t('common.open'), onClick: () => setOpenTask(n.taskId) } : undefined,
       });
     } else if (n.kind === 'TASK_OVERDUE') {
@@ -111,7 +111,9 @@ export function Layout() {
 
   const nav = [
     { to: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, leader: true },
-    { to: '/my-day', label: t('nav.myDay'), icon: CalendarCheck },
+    isLeader
+      ? { to: '/my-day', label: t('nav.myDay'), icon: CalendarCheck }
+      : { to: '/my-day', label: t('nav.home'), icon: LayoutDashboard },
     { to: '/clients', label: t('nav.clients'), icon: Building2 },
     { to: '/monthly', label: t('nav.monthly'), icon: Sheet },
     { to: '/audit', label: t('nav.audit'), icon: History, leader: true },
