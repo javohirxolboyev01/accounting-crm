@@ -35,17 +35,21 @@ export function Dialog({
 }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
+  // onClose odatda inline funksiya: har renderda yangilanadi. Effekt unga bog'lansa,
+  // har harf yozilganda qayta ishlab fokusni birinchi inputga qaytarardi — shuning uchun ref orqali
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
     document.addEventListener('keydown', onKey);
     setTimeout(() => ref.current?.querySelector<HTMLElement>('input,select,textarea,button:not([data-close])')?.focus(), 0);
     return () => {
       document.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[60] flex animate-fade-in items-start justify-center overflow-y-auto bg-black/50 no-scrollbar p-4 sm:items-center" onMouseDown={onClose}>
