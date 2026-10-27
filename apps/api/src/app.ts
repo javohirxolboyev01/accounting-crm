@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
@@ -53,6 +55,23 @@ export function createApp() {
   app.use('/api', (_req, res) => {
     res.status(404).json({ code: 'NOT_FOUND', message: 'Endpoint topilmadi', details: null });
   });
+
+  // Prod: frontend build'i (apps/web/dist) shu serverdan beriladi — bitta origin,
+  // shuning uchun refresh cookie (sameSite=strict) va SSE CORS'siz ishlaydi.
+  if (config.isProd) {
+    const webDist = path.resolve(__dirname, '../../web/dist');
+    if (fs.existsSync(webDist)) {
+      // Vite assets nomida hash bor — uzoq keshlash xavfsiz; qolganlari (favicon, rasmlar) oddiy
+      app.use('/assets', express.static(path.join(webDist, 'assets'), { maxAge: '1y', immutable: true }));
+      app.use(express.static(webDist, { index: false }));
+      // SPA: /api bo'lmagan GET so'rovlar index.html'ga (React Router)
+      app.use((req, res, next) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+        res.setHeader('Cache-Control', 'no-cache');
+        res.sendFile(path.join(webDist, 'index.html'));
+      });
+    }
+  }
   app.use(errorHandler);
   return app;
 }

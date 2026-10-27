@@ -9,13 +9,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
     <title>Buxgalteriya CRM</title>
     <!-- Mavzu sahifa chizilishidan oldin qo'yiladi (oq chaqnash bo'lmasin); asosiy mantiq src/lib/theme.ts -->
-    <script>
-      try {
-        var t = localStorage.getItem('theme');
-        if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches))
-          document.documentElement.classList.add('dark');
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body class="bg-page font-sans text-ink antialiased">
     <div id="root"></div>
