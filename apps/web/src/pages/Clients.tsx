@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { useAccountants } from '@/hooks/tasks';
 import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -55,8 +56,8 @@ export default function Clients() {
             />
           )}
         </div>
-        <QueryState q={q}>
-          {q.data?.items.length === 0 ? (
+        <QueryState q={q} skeleton={<TableSkeleton rows={10} cols={7} />}>
+          {!q.data?.items?.length ? (
             <Empty />
           ) : (
             <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">

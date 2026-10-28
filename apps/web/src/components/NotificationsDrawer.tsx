@@ -91,7 +91,7 @@ export function NotificationsDrawer({ open, onClose, onOpenTask }: { open: boole
 
         <div className="custom-scrollbar flex-1 overflow-y-auto">
           <QueryState q={q}>
-            {q.data?.items.length === 0 && <Empty text={t('notif.empty')} />}
+            {!q.data?.items?.length && <Empty text={t('notif.empty')} />}
             <ul className="divide-y divide-gray-200">
               {q.data?.items.map((n) => {
                 const st = KIND_STYLE[n.kind] ?? KIND_STYLE.TASK_DONE;

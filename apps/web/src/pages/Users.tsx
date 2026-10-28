@@ -8,7 +8,8 @@ import { Badge, Card, PageHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { QueryState } from '@/components/ui/states';
+import { Empty, QueryState } from '@/components/ui/states';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { errorText } from '@/lib/errors';
@@ -57,7 +58,8 @@ export default function Users() {
     <div>
       <PageHeader title={t('users.title')} actions={<Button onClick={() => setEdit({ ...blank })}><Plus className="h-4 w-4" /> {t('users.new')}</Button>} />
       <Card>
-        <QueryState q={q}>
+        <QueryState q={q} skeleton={<TableSkeleton rows={10} cols={7} />}>
+          {!q.data?.length ? <Empty /> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="table-head">
@@ -92,6 +94,7 @@ export default function Users() {
               </tbody>
             </table>
           </div>
+          )}
         </QueryState>
       </Card>
 

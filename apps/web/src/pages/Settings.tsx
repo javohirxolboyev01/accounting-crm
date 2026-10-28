@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Checkbox, Field, Input } from '@/components/ui/input';
-import { QueryState } from '@/components/ui/states';
+import { Empty, QueryState } from '@/components/ui/states';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { errorText } from '@/lib/errors';
@@ -93,7 +94,8 @@ function ReportTypesTab() {
           </>
         }
       />
-      <QueryState q={q}>
+      <QueryState q={q} skeleton={<TableSkeleton rows={10} cols={8} />}>
+        {!draft.length ? <Empty /> : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="table-head">
@@ -147,6 +149,7 @@ function ReportTypesTab() {
             </tbody>
           </table>
         </div>
+        )}
         <p className="px-4 py-3 text-xs text-gray-500">{t('settings.reportTypesHint')}</p>
       </QueryState>
       <Summary open={summary} onClose={() => setSummary(false)} onConfirm={() => save.mutate()} lines={lines} busy={save.isPending} />
@@ -226,6 +229,7 @@ function RoutinesTab() {
         }
       />
       <QueryState q={q}>
+        {!draft.length && <Empty />}
         <ul className="divide-y">
           {draft.map((w, i) => (
             <li key={w.id} className={cn('flex flex-wrap items-center gap-2 px-4 py-2 text-sm', !w.active && 'opacity-50', changes.some((c) => c.row.id === w.id) && 'bg-amber-50')}>
@@ -282,6 +286,7 @@ function TemplatesTab() {
     <Card>
       <CardHeader title={t('settings.templates')} />
       <QueryState q={q}>
+        {!q.data?.length && <Empty />}
         <ul className="divide-y">
           {q.data?.map((tpl) => (
             <li key={tpl.id} className="flex items-center gap-2 px-4 py-2">

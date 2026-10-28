@@ -21,7 +21,7 @@ const Sheets = lazy(() => import('./pages/Sheets'));
 function Protected({ roles, children }: { roles?: Role[]; children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
-  if (loading) return <Loading className="h-screen" />;
+  if (loading) return <Loading className="h-screen animate-none" />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/my-day" replace />;
   return <>{children}</>;
@@ -34,9 +34,10 @@ function Home() {
 
 const L: Role[] = ['LEADER'];
 
+/** Asosiy loader faqat loyiha ochilganda: auth tekshiruvi va birinchi sahifa kodi yuklanguncha */
 export default function App() {
   return (
-    <Suspense fallback={<Loading className="h-screen" />}>
+    <Suspense fallback={<Loading className="h-screen animate-none" />}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<Protected><Layout /></Protected>}>

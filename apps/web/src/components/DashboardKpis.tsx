@@ -169,7 +169,7 @@ function ReadyCard({ s }: { s: DashboardClients['summary'] }) {
  */
 function InProgressCard({ data }: { data: DashboardClients }) {
   const { t } = useTranslation();
-  const list = data.clients.filter((c) => c.state === 'IN_PROGRESS');
+  const list = (data.clients ?? []).filter((c) => c.state === 'IN_PROGRESS');
   const waiting = list.filter((c) => c.waiting > 0).length;
   const avg = list.length ? Math.round(list.reduce((n, c) => n + (c.percent ?? 0), 0) / list.length) : 0;
   const shades = ['from-amber-200 to-amber-300', 'from-amber-300 to-amber-400', 'from-amber-400 to-amber-500', 'from-amber-500 to-amber-600'];

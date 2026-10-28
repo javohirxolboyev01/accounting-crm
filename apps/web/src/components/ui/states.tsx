@@ -1,14 +1,32 @@
 import { AlertTriangle, Inbox } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Logo } from '@/components/Logo';
+import { cn } from '@/lib/cn';
 import { Button } from './button';
-import { Spinner } from './spinner';
+import { ListSkeleton } from './skeleton';
 import { errorText } from '@/lib/errors';
 
+/**
+ * Asosiy loader — faqat loyiha yuklanayotganda (auth, lazy sahifa chunk'i).
+ * Backend ma'lumoti uchun loader emas, skeleton (QueryState) ishlatiladi: ikki xil loader ketma-ket chiqmasin.
+ */
 export function Loading({ className = 'py-10' }: { className?: string }) {
   const { t } = useTranslation();
   return (
-    <div className={`flex items-center justify-center gap-3 text-sm text-gray-500 ${className}`} role="status">
-      <Spinner size="small" className="text-brand-500" /> {t('common.loading')}
+    <div className={cn('flex animate-fade-in-late flex-col items-center justify-center gap-3', className)} role="status" aria-live="polite">
+      <div className="relative h-16 w-16">
+        <span className="absolute inset-0 rounded-full border-2 border-brand-500/15" />
+        <span className="absolute inset-0 rounded-full border-2 border-transparent border-t-brand-500 motion-safe:animate-orbit" />
+        <Logo variant="mark" className="absolute inset-4 motion-safe:animate-breathe" />
+      </div>
+      <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500">
+        {t('common.loading').replace('…', '')}
+        <span className="flex gap-0.5" aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <span key={i} className="h-1 w-1 rounded-full bg-brand-500 motion-safe:animate-dot-rise" style={{ animationDelay: `${i * 0.15}s` }} />
+          ))}
+        </span>
+      </div>
     </div>
   );
 }
@@ -38,9 +56,13 @@ export function Empty({ text }: { text?: string }) {
   );
 }
 
-/** useQuery natijasi uchun umumiy holatlar */
-export function QueryState({ q, children }: { q: { isLoading: boolean; error: unknown; refetch: () => unknown }; children: React.ReactNode }) {
-  if (q.isLoading) return <Loading />;
+/**
+ * useQuery natijasi uchun umumiy holatlar. Yuklanayotganda — o'z joyida skeleton (blok shakliga mos `skeleton` beriladi),
+ * server ma'lumot qaytarmasa (null/undefined) — Empty.
+ */
+export function QueryState({ q, skeleton, children }: { q: { isLoading: boolean; error: unknown; data?: unknown; refetch: () => unknown }; skeleton?: React.ReactNode; children: React.ReactNode }) {
+  if (q.isLoading) return <>{skeleton ?? <ListSkeleton />}</>;
   if (q.error) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
+  if (q.data == null) return <Empty />;
   return <>{children}</>;
 }

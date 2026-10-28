@@ -114,6 +114,9 @@ export default {
           '23%': { transform: 'rotate(-3deg)' },
         },
         'badge-pop': { '0%': { transform: 'scale(0)' }, '60%': { transform: 'scale(1.25)' }, '100%': { transform: 'scale(1)' } },
+        // Sahifa loaderi: belgi sekin "nafas oladi", nuqtalar navbat bilan ko'tariladi
+        breathe: { '0%, 100%': { transform: 'scale(0.92)', opacity: '0.85' }, '50%': { transform: 'scale(1)', opacity: '1' } },
+        'dot-rise': { '0%, 60%, 100%': { transform: 'translateY(0)', opacity: '0.35' }, '30%': { transform: 'translateY(-4px)', opacity: '1' } },
       },
       animation: {
         'fade-in': 'fade-in 150ms ease-out',
@@ -122,6 +125,11 @@ export default {
         'spin-fade': 'spin-fade 1.2s linear infinite',
         'bell-ring': 'bell-ring 3.5s ease-in-out infinite',
         'badge-pop': 'badge-pop 400ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+        breathe: 'breathe 1.8s ease-in-out infinite',
+        'dot-rise': 'dot-rise 1.2s ease-in-out infinite',
+        'orbit': 'spin 1.4s cubic-bezier(0.5, 0.15, 0.5, 0.85) infinite',
+        // Tez yuklansa loader umuman ko'rinmasin (miltillamaslik uchun kechikib chiqadi)
+        'fade-in-late': 'fade-in 250ms ease-out 150ms both',
       },
     },
   },

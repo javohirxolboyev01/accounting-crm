@@ -8,6 +8,7 @@ import { Field } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { api, qs } from '@/lib/api';
 import { fmtDateTime } from '@/lib/time';
 import type { AuditItem, Client, Paged, User } from '@/lib/types';
@@ -83,8 +84,8 @@ export default function Audit() {
           <Field label={t('audit.from')}><DatePicker value={f.from} onChange={(v) => set({ from: v })} /></Field>
           <Field label={t('audit.to')}><DatePicker value={f.to} onChange={(v) => set({ to: v })} /></Field>
         </div>
-        <QueryState q={q}>
-          {q.data?.items.length === 0 ? <Empty /> : (
+        <QueryState q={q} skeleton={<TableSkeleton rows={10} cols={6} />}>
+          {!q.data?.items?.length ? <Empty /> : (
             <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">
               <table className="w-full text-sm">
                 <thead className="table-head sticky top-0 z-10">

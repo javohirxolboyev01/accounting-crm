@@ -6,6 +6,7 @@ import { MyDayKpis } from '@/components/MyDayKpis';
 import { TaskCard } from '@/components/TaskCard';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
 import { QueryState } from '@/components/ui/states';
+import { KpiSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { useChangeStatus, useMarkDone } from '@/hooks/tasks';
 import { useOpenTask } from '@/hooks/outlet';
 import { api } from '@/lib/api';
@@ -15,8 +16,8 @@ import type { MyDay as MyDayData, Task, TaskStatus } from '@/lib/types';
 
 const COLUMNS = ['TODO', 'IN_PROGRESS', 'WAITING_CLIENT', 'DONE'] as const;
 
-function Group({ title, icon, tasks, tone, onOpen, onDone }: { title: string; icon: React.ReactNode; tasks: Task[]; tone: string; onOpen: (id: number) => void; onDone: (id: number) => void }) {
-  if (!tasks.length) return null;
+function Group({ title, icon, tasks, tone, onOpen, onDone }: { title: string; icon: React.ReactNode; tasks?: Task[]; tone: string; onOpen: (id: number) => void; onDone: (id: number) => void }) {
+  if (!tasks?.length) return null;
   return (
     <Card className={cn('border-l-4', tone)}>
       <CardHeader title={<span className="flex items-center gap-2">{icon} {title} ({tasks.length})</span>} />
@@ -41,14 +42,29 @@ export default function MyDay() {
   return (
     <div>
       <PageHeader title={isLeader ? t('myDay.title') : t('myDay.myTasks')} breadcrumb={false} />
-      <QueryState q={q}>
+      <QueryState
+        q={q}
+        skeleton={
+          <div className="space-y-4">
+            <KpiSkeleton />
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {COLUMNS.map((col) => (
+                <div key={col} className="space-y-2 rounded-md bg-white p-2">
+                  <Skeleton className="m-1 h-3.5 w-1/3" />
+                  {[0, 1, 2].map((i) => <Skeleton key={i} className="h-20 w-full rounded-md" />)}
+                </div>
+              ))}
+            </div>
+          </div>
+        }
+      >
         {d && (
           <div className="space-y-4">
             <MyDayKpis d={d} />
 
-            <Group title={t('myDay.urgent')} icon={<Siren className="h-4 w-4 text-red-600" />} tasks={d.groups.urgent} tone="border-l-red-600" onOpen={openTask} onDone={onDone} />
-            <Group title={t('myDay.overdue')} icon={<AlertTriangle className="h-4 w-4 text-overdue" />} tasks={d.groups.overdue} tone="border-l-overdue" onOpen={openTask} onDone={onDone} />
-            <Group title={t('myDay.today')} icon={<CalendarDays className="h-4 w-4 text-soon" />} tasks={d.groups.today} tone="border-l-soon" onOpen={openTask} onDone={onDone} />
+            <Group title={t('myDay.urgent')} icon={<Siren className="h-4 w-4 text-red-600" />} tasks={d.groups?.urgent} tone="border-l-red-600" onOpen={openTask} onDone={onDone} />
+            <Group title={t('myDay.overdue')} icon={<AlertTriangle className="h-4 w-4 text-overdue" />} tasks={d.groups?.overdue} tone="border-l-overdue" onOpen={openTask} onDone={onDone} />
+            <Group title={t('myDay.today')} icon={<CalendarDays className="h-4 w-4 text-soon" />} tasks={d.groups?.today} tone="border-l-soon" onOpen={openTask} onDone={onDone} />
 
             <p className="text-xs text-gray-500">{t('myDay.dragHint')}</p>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -61,19 +77,19 @@ export default function MyDay() {
                   onDrop={(e) => {
                     setDragOver(null);
                     const id = Number(e.dataTransfer.getData('text/task-id'));
-                    const task = Object.values(d.columns).flat().find((x) => x.id === id);
+                    const task = Object.values(d.columns ?? {}).flat().find((x) => x.id === id);
                     if (task && task.status !== col) changeStatus(id, col as TaskStatus);
                   }}
                   className={cn('rounded-md bg-white p-2', dragOver === col && 'ring-2 ring-brand-500')}
                 >
                   <h2 className="mb-2 flex items-center justify-between px-1 text-sm font-semibold">
-                    {t(`taskStatus.${col}`)} <span className="text-xs font-normal text-gray-500">{d.columns[col].length}</span>
+                    {t(`taskStatus.${col}`)} <span className="text-xs font-normal text-gray-500">{d.columns?.[col]?.length ?? 0}</span>
                   </h2>
                   <div className="max-h-[70vh] space-y-2 overflow-y-auto">
-                    {d.columns[col].map((task) => (
+                    {d.columns?.[col]?.map((task) => (
                       <TaskCard key={task.id} task={task} onOpen={openTask} onDone={col !== 'DONE' ? onDone : undefined} draggable={col !== 'DONE'} />
                     ))}
-                    {d.columns[col].length === 0 && <p className="px-1 py-4 text-center text-xs text-gray-400">{t('myDay.emptyColumn')}</p>}
+                    {!d.columns?.[col]?.length && <p className="px-1 py-4 text-center text-xs text-gray-400">{t('myDay.emptyColumn')}</p>}
                   </div>
                 </section>
               ))}

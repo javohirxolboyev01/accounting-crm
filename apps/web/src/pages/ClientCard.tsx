@@ -12,6 +12,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { Field, Input, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
+import { FormSkeleton, ListSkeleton } from '@/components/ui/skeleton';
 import { invalidateTasks, taskTitle, taskTone, useAccountants } from '@/hooks/tasks';
 import { useOpenTask } from '@/hooks/outlet';
 import { api, qs } from '@/lib/api';
@@ -162,8 +163,9 @@ export default function ClientCard() {
         <div className="space-y-4">
           <Card>
             <CardHeader title={t('clients.taxHistory')} />
+            {!q.data.taxHistory?.length && <Empty />}
             <ul className="divide-y text-sm">
-              {q.data.taxHistory.map((h) => (
+              {q.data.taxHistory?.map((h) => (
                 <li key={h.id} className="flex justify-between px-4 py-2">
                   <span><b>{h.taxType}</b> · {h.effectiveFrom === '2000-01-01' ? t('clients.fromStart') : `${fmtDate(h.effectiveFrom)} ${t('clients.since')}`}</span>
                   <span className="text-xs text-gray-500">{h.createdByName ?? t('notif.system')}</span>
@@ -180,7 +182,7 @@ export default function ClientCard() {
                 <Button variant="outline" disabled={!/^\d{4}-Q[1-4]$/.test(quarter)} onClick={() => dividend.mutate({ quarter, on: true })}>{t('clients.markDividend')}</Button>
               </div>
               <ul className="flex flex-wrap gap-2">
-                {q.data.dividendQuarters.map((dq) => (
+                {q.data.dividendQuarters?.map((dq) => (
                   <li key={dq} className="inline-flex items-center gap-1 rounded-full border bg-gray-50 px-2 py-0.5 text-xs">
                     {dq}
                     <button onClick={() => dividend.mutate({ quarter: dq, on: false })} aria-label={t('common.delete')}><Trash2 className="h-3 w-3 text-gray-400 hover:text-red-600" /></button>
@@ -194,7 +196,7 @@ export default function ClientCard() {
       <Card className="xl:col-span-2">
         <CardHeader title={t('clients.currentTasks')} />
         <QueryState q={tasks}>
-          {tasks.data?.length === 0 && <Empty />}
+          {!tasks.data?.length && <Empty />}
           <ul className="divide-y text-sm">
             {tasks.data?.map((task) => {
               const tone = taskTone(task);
@@ -216,6 +218,7 @@ export default function ClientCard() {
       <Card>
         <CardHeader title={t('clients.history')} />
         <QueryState q={history}>
+          {!history.data?.length && <Empty />}
           <ul className="max-h-[500px] divide-y overflow-y-auto text-xs">
             {history.data?.map((h) => (
               <li key={h.id} className="px-4 py-2">
@@ -233,7 +236,20 @@ export default function ClientCard() {
   return (
     <div>
       <PageHeader crumbs={[{ to: '/clients', label: t('nav.clients') }]} title={q.data?.name ?? '…'} />
-      <QueryState q={q}>{content}</QueryState>
+      <QueryState
+        q={q}
+        skeleton={
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="rounded-md bg-white xl:col-span-2"><FormSkeleton fields={9} /></div>
+            <div className="space-y-4">
+              <div className="rounded-md bg-white"><ListSkeleton rows={2} /></div>
+              <div className="rounded-md bg-white"><ListSkeleton rows={2} /></div>
+            </div>
+          </div>
+        }
+      >
+        {content}
+      </QueryState>
       <Dialog
         open={confirmTax}
         onClose={() => setConfirmTax(false)}

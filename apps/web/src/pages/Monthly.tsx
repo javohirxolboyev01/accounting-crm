@@ -8,6 +8,7 @@ import { Card, PageHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { useAccountants, useMarkDone } from '@/hooks/tasks';
 import { useOpenTask } from '@/hooks/outlet';
 import { api, qs } from '@/lib/api';
@@ -76,9 +77,9 @@ export default function Monthly() {
             ))}
           </div>
         </div>
-        <QueryState q={q}>
-          {g && g.rows.length === 0 && <Empty text={t('monthly.empty')} />}
-          {g && g.rows.length > 0 && (
+        <QueryState q={q} skeleton={<TableSkeleton rows={12} cols={10} />}>
+          {!g?.rows?.length && <Empty text={t('monthly.empty')} />}
+          {g && g.rows?.length > 0 && (
             // ~100 qator x ~10 ustun: oddiy jadval yetarli (virtualizatsiya shart emas)
             <div className="max-h-[calc(100vh-240px)] overflow-auto">
               <table className="w-full border-separate border-spacing-0 text-sm">

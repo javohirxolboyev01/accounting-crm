@@ -10,6 +10,7 @@ import { MonthPicker } from '@/components/ui/date-picker';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input } from '@/components/ui/input';
 import { Empty, QueryState } from '@/components/ui/states';
+import { FormSkeleton } from '@/components/ui/skeleton';
 import { invalidateTasks } from '@/hooks/tasks';
 import { ApiError, api, qs } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -338,7 +339,7 @@ function ReviewCard() {
     <Card>
       <CardHeader title={`${t('sheets.manualReview')} (${q.data?.length ?? 0})`} />
       <QueryState q={q}>
-        {q.data?.length === 0 && <Empty />}
+        {!q.data?.length && <Empty />}
         <ul className="max-h-96 divide-y overflow-y-auto text-sm">
           {q.data?.map((r) => (
             <li key={r.id} className="flex items-center gap-3 px-4 py-2">
@@ -370,7 +371,7 @@ function SyncCard() {
   return (
     <Card>
       <CardHeader title={t('sheets.sync')} actions={<Button size="sm" disabled={!s?.googleConfigured || sync.isPending} onClick={() => sync.mutate(undefined)}><RefreshCw className={cn('h-4 w-4', sync.isPending && 'animate-spin')} /> {t('sheets.syncNow')}</Button>} />
-      <QueryState q={q}>
+      <QueryState q={q} skeleton={<FormSkeleton fields={4} />}>
         {s && (
           <div className="space-y-4 p-4 text-sm">
             {!s.googleConfigured && <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-800">{t('sheets.notConfigured')}</p>}

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
+import { KpiSkeleton, TableSkeleton } from '@/components/ui/skeleton';
 import { invalidateTasks, useAccountants } from '@/hooks/tasks';
 import { useOpenTask } from '@/hooks/outlet';
 import { api, qs } from '@/lib/api';
@@ -46,6 +47,7 @@ export default function Dashboard() {
   const accs = useQuery({
     queryKey: ['dashboard', 'accountants', from],
     queryFn: () => api.get<DashboardAccountants>(`/dashboard/accountants${qs({ from, to: todayIso() })}`),
+    placeholderData: (prev) => prev,
     refetchInterval: 60_000,
   });
   const assign = useMutation({
@@ -58,12 +60,12 @@ export default function Dashboard() {
     onError: (e) => toast.error(errorText(e, t)),
   });
 
-  const rows = clients.data?.clients.filter((c) => clientFilter === 'ALL' || c.state === clientFilter) ?? [];
+  const rows = clients.data?.clients?.filter((c) => clientFilter === 'ALL' || c.state === clientFilter) ?? [];
 
   return (
     <div className="space-y-4">
-      <QueryState q={clients}>
-        {clients.data && <DashboardKpis data={clients.data} />}
+      <QueryState q={clients} skeleton={<KpiSkeleton />}>
+        {clients.data?.summary ? <DashboardKpis data={clients.data} /> : <Empty />}
       </QueryState>
 
       {!!clients.data?.overdueTasks.length && (
@@ -102,7 +104,8 @@ export default function Dashboard() {
             </div>
           }
         />
-        <QueryState q={accs}>
+        <QueryState q={accs} skeleton={<TableSkeleton rows={5} cols={9} />}>
+          {!accs.data?.accountants?.length ? <Empty /> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="table-head">
@@ -137,6 +140,7 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+          )}
         </QueryState>
       </Card>
 
@@ -158,7 +162,7 @@ export default function Dashboard() {
             />
           }
         />
-        <QueryState q={clients}>
+        <QueryState q={clients} skeleton={<TableSkeleton rows={8} cols={5} />}>
           {rows.length === 0 ? <Empty /> : (
             <div className="max-h-[600px] overflow-auto">
               <table className="w-full text-sm">

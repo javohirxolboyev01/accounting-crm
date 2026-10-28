@@ -12,12 +12,12 @@ import type { MyDay } from '@/lib/types';
  */
 export function MyDayKpis({ d }: { d: MyDay }) {
   const { t } = useTranslation();
-  const s = d.stats;
-  const cur = <T extends { period: string }>(list: T[]) => list.filter((x) => x.period === d.period);
-  const todo = cur(d.columns.TODO);
-  const inProgress = cur(d.columns.IN_PROGRESS);
-  const waiting = cur(d.columns.WAITING_CLIENT);
-  const doneList = cur(d.columns.DONE);
+  const s = d.stats ?? { done: 0, doneOnTime: 0, doneToday: 0, open: 0, overdue: 0 };
+  const cur = <T extends { period: string }>(list?: T[]) => (list ?? []).filter((x) => x.period === d.period);
+  const todo = cur(d.columns?.TODO);
+  const inProgress = cur(d.columns?.IN_PROGRESS);
+  const waiting = cur(d.columns?.WAITING_CLIENT);
+  const doneList = cur(d.columns?.DONE);
   const open = [...todo, ...inProgress, ...waiting];
 
   // 2. Kechikkan: mijozlar kesimida eng ko'p 3 tasi
@@ -26,7 +26,7 @@ export function MyDayKpis({ d }: { d: MyDay }) {
   const topOverdue = [...byClient.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
 
   // 3. Bugun: bajarilganlar / bugun muddati tugaydigan ochiqlar
-  const todayLeft = d.groups.today.length;
+  const todayLeft = d.groups?.today?.length ?? 0;
   const todayShare = pct(s.doneToday, s.doneToday + todayLeft);
 
   // 4. Shu oy: bajarildi / jami (bajarildi + ochiq)
