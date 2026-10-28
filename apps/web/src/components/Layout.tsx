@@ -5,12 +5,12 @@ import {
   Building2,
   CalendarCheck,
   CircleUserRound,
-  FileSpreadsheet,
   History,
   LayoutDashboard,
   LogOut,
   PanelRightClose,
   PanelRightOpen,
+  PhoneCall,
   Plus,
   Settings,
   Sheet,
@@ -104,23 +104,30 @@ export function Layout() {
       });
     } else if (n.kind === 'TASK_OVERDUE') {
       toast.warning(text);
+    } else if (n.kind === 'LEAD_WON') {
+      toast.success(text, {
+        duration: 10000,
+        action: n.payload?.leadId ? { label: t('common.open'), onClick: () => navigate(`/leads?lead=${n.payload.leadId}`) } : undefined,
+      });
     } else {
       toast(text);
     }
   });
 
+  const isOperator = user?.role === 'OPERATOR';
+  // staff — buxgalteriya bo'limlari (operatorga yo'q); operator faqat "Yangi mijozlar"ni ko'radi
   const nav = [
     { to: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, leader: true },
     isLeader
-      ? { to: '/my-day', label: t('nav.myDay'), icon: CalendarCheck }
-      : { to: '/my-day', label: t('nav.home'), icon: LayoutDashboard },
-    { to: '/clients', label: t('nav.clients'), icon: Building2 },
-    { to: '/monthly', label: t('nav.monthly'), icon: Sheet },
+      ? { to: '/my-day', label: t('nav.myDay'), icon: CalendarCheck, staff: true }
+      : { to: '/my-day', label: t('nav.home'), icon: LayoutDashboard, staff: true },
+    { to: '/clients', label: t(isLeader ? 'nav.clientsLeader' : 'nav.clients'), icon: Building2, staff: true },
+    { to: '/monthly', label: t('nav.monthly'), icon: Sheet, staff: true },
+    ...(isLeader || isOperator ? [{ to: '/leads', label: t('nav.leads'), icon: PhoneCall }] : []),
     { to: '/audit', label: t('nav.audit'), icon: History, leader: true },
     { to: '/users', label: t('nav.users'), icon: Users, leader: true },
-    { to: '/sheets', label: t('nav.sheets'), icon: FileSpreadsheet, leader: true },
     { to: '/settings', label: t('nav.settings'), icon: Settings, leader: true },
-  ].filter((n) => !n.leader || isLeader);
+  ].filter((n) => (!n.leader || isLeader) && (!n.staff || !isOperator));
 
   const toggleSidebar = () =>
     setExpanded((v) => {

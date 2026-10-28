@@ -47,10 +47,12 @@ export async function generatePeriod(db: Db, period: string, clientId: number | 
   const reports = await q(
     db,
     `${A}
-     INSERT INTO task (client_id, kind, report_type_id, period, title, assignee_id, due_at, status)
+     INSERT INTO task (client_id, kind, report_type_id, period, title, assignee_id, due_at, status, overdue_notified_at)
      SELECT a.client_id, 'REPORT', a.report_type_id, $1, rt.name,
             CASE WHEN rt.creates_accountant_task THEN c.accountant_id END,
-            fn_due_at($1, rt.due_day, $3), 'TODO'
+            fn_due_at($1, rt.due_day, $3), 'TODO',
+            -- oy o'rtasida yaratilib muddati allaqachon o'tgan bo'lsa (yangi hisobot turi, kech generatsiya) xabar yuborilmaydi
+            CASE WHEN fn_due_at($1, rt.due_day, $3) < now() THEN now() END
      FROM a
      JOIN report_type rt ON rt.id = a.report_type_id
      JOIN client c ON c.id = a.client_id
@@ -89,7 +91,31 @@ export async function generatePeriod(db: Db, period: string, clientId: number | 
     [period, clientId, dueTime],
   );
 
-  return { period, created: [...reports, ...routines], reopened: [...reopenedReports, ...reopenedRoutines] };
+  // 3) Choraklik/yillik ustunlar jadvalda har oy ko'rinadi (V11): katak oxirgi generatsiya oyidagi vazifadan.
+  //    O'sha davr vazifasi yo'q bo'lsa (tizim keyin ishga tushgan, mijoz yangi qo'shilgan) shu davrga yaratiladi.
+  //    Muddati allaqachon o'tgan bo'lsa "muddat o'tdi" xabari yuborilmaydi (overdue_notified_at = now()).
+  const backfilled = await q(
+    db,
+    `WITH g AS (SELECT * FROM fn_grid_columns($1) WHERE source_period < $1),
+          a AS (SELECT x.client_id, x.report_type_id, g.source_period AS period
+                FROM (SELECT DISTINCT source_period FROM g) s
+                CROSS JOIN LATERAL fn_report_applicability(s.source_period) x
+                JOIN g ON g.report_type_id = x.report_type_id AND g.source_period = s.source_period
+                WHERE x.applicable AND ($2::bigint IS NULL OR x.client_id = $2))
+     INSERT INTO task (client_id, kind, report_type_id, period, title, assignee_id, due_at, status, overdue_notified_at)
+     SELECT a.client_id, 'REPORT', a.report_type_id, a.period, rt.name,
+            CASE WHEN rt.creates_accountant_task THEN c.accountant_id END,
+            fn_due_at(a.period, rt.due_day, $3), 'TODO',
+            CASE WHEN fn_due_at(a.period, rt.due_day, $3) < now() THEN now() END
+     FROM a
+     JOIN report_type rt ON rt.id = a.report_type_id
+     JOIN client c ON c.id = a.client_id
+     ${CONFLICT}
+     RETURNING id, client_id AS "clientId", kind, title`,
+    [period, clientId, dueTime],
+  );
+
+  return { period, created: [...reports, ...routines, ...backfilled], reopened: [...reopenedReports, ...reopenedRoutines] };
 }
 
 /**

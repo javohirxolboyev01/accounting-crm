@@ -12,8 +12,6 @@ import { errorText } from '@/lib/errors';
 import { fmtDateTime } from '@/lib/time';
 import type { Lang, NotificationKind } from '@/lib/types';
 
-const KINDS: NotificationKind[] = ['TASK_DONE', 'TASK_OVERDUE', 'URGENT_TASK'];
-
 export default function Profile() {
   const { t, i18n } = useTranslation();
   const { user, reload } = useAuth();
@@ -42,6 +40,7 @@ export default function Profile() {
 
   if (!user) return null;
   const prefs = user.notificationPrefs ?? {};
+  const kinds = user.notificationKinds ?? [];
   const setPref = (kind: NotificationKind, channel: 'app' | 'telegram', value: boolean) =>
     save.mutate({ notificationPrefs: { ...prefs, [kind]: { ...prefs[kind], [channel]: value } } });
 
@@ -112,14 +111,14 @@ export default function Profile() {
         </div>
       </Card>
 
-      <Card>
+      {!!kinds.length && <Card>
         <CardHeader title={t('profile.prefs')} />
         <table className="w-full text-sm">
           <thead className="table-head">
             <tr><th className="px-4 py-2.5">{t('profile.kind')}</th><th className="px-4 py-2.5">{t('profile.inApp')}</th><th className="px-4 py-2.5">Telegram</th></tr>
           </thead>
           <tbody>
-            {KINDS.map((k) => (
+            {kinds.map((k) => (
               <tr key={k} className="border-t">
                 <td className="px-4 py-2">{t(`notifKind.${k}`)}</td>
                 <td className="px-4 py-2"><input type="checkbox" aria-label={`${t(`notifKind.${k}`)} — ${t('profile.inApp')}`} checked={prefs[k]?.app !== false} onChange={(e) => setPref(k, 'app', e.target.checked)} /></td>
@@ -128,7 +127,7 @@ export default function Profile() {
             ))}
           </tbody>
         </table>
-      </Card>
+      </Card>}
     </div>
   );
 }

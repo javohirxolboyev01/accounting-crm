@@ -1,7 +1,8 @@
 # Buxgalteriya CRM
 
 Buxgalteriya firmasi uchun CRM: oylik vazifalar va hisobotlar avtomatik yaratiladi, buxgalter "Bajarildi" bosadi,
-rahbar dashboard'da kim nima qilayotganini ko'radi, Google Sheet bilan ikki tomonlama sinxron.
+rahbar dashboard'da kim nima qilayotganini ko'radi. Ma'lumot Excel (.xlsx) importi bilan keladi; sotuv operatori
+yangi mijozlarga qo'ng'iroqlarni shu yerda yuritadi.
 Biznes qoidalari: [CLAUDE.md](CLAUDE.md).
 
 - **Backend:** Node.js 20+ · Express 5 · TypeScript · PostgreSQL 16 (toza SQL, Flyway uslubidagi migratsiyalar)
@@ -20,13 +21,13 @@ docker compose up -d            # buxcrm, buxcrm_test, buxcrm_e2e bazalari yarat
 cp .env.example .env
 npm install
 
-# 3. Dev ma'lumot (1 rahbar, 3 buxgalter, 10 mijoz) va ishga tushirish
-npm run db:seed
+# 3. Ishga tushirish
 npm run dev                     # API: http://localhost:8080/api, Web: http://localhost:5173
 ```
 
-Dev loginlar: `rahbar`, `aziza`, `bobur`, `gulnora` — parol `Parol123!`.
-Bo'sh bazada birinchi ishga tushishda `.env` dagi `BOOTSTRAP_LEADER_*` bilan rahbar yaratiladi.
+Demo ma'lumot yo'q: bo'sh bazada birinchi ishga tushishda `.env` dagi `BOOTSTRAP_LEADER_*` bilan rahbar yaratiladi.
+Keyin Xodimlar bo'limida buxgalterlarni qo'shing va fayllarni o'z sahifasidan yuklang ("Excel yuklash" tugmasi):
+«Бухгалтер ишлари» fayli — Buxgalter ishlari, hisobot jadvali — Hisobot topshirish, operator bazasi — Yangi mijozlar.
 
 ## Buyruqlar
 
@@ -50,8 +51,7 @@ Bo'sh bazada birinchi ishga tushishda `.env` dagi `BOOTSTRAP_LEADER_*` bilan rah
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Kamida 32 belgi, bir-biridan farqli. Prod'da zaif bo'lsa API ishga tushmaydi |
 | `BOOTSTRAP_LEADER_LOGIN/PASSWORD/NAME` | Bo'sh bazada birinchi rahbar |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | Telegram bot (ixtiyoriy). Bo'sh bo'lsa faqat ilova ichidagi bildirishnoma |
-| `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_SHEET_ID` | Google Sheets service account JSON kaliti yo'li (ixtiyoriy) |
-| `SCHEDULER_ENABLED` | Generator, dispatcher, eslatma, sinxron (standart `true`) |
+| `SCHEDULER_ENABLED` | Generator, dispatcher, eslatma (standart `true`) |
 | `BACKUP_ENABLED`, `BACKUP_DIR` | API ichidan kunlik zaxira (02:30) |
 
 ## Tuzilma
@@ -91,9 +91,10 @@ scripts/backup.sh            kunlik zaxira
   (faolsizlantirilgan xodim darhol uziladi).
 - **Audit faqat qo'shiladi:** DB triggeri `UPDATE/DELETE/TRUNCATE` ni taqiqlaydi. Generator oyiga bitta umumiy yozuv
   qoldiradi (har vazifa uchun emas), qolgan barcha yozish amallari alohida yoziladi.
-- **Sheets sinxron:** har katak uchun oxirgi sinxronlangan qiymat (`sheet_sync_cell`) saqlanadi — qaysi tomon
-  o'zgargani shundan aniqlanadi. Ikkalasi o'zgarsa: vazifa `updated_at` va jadval faylining `modifiedTime` (Drive API)
-  solishtiriladi, ikkala qiymat audit'ga. Tanib bo'lmaydigan qiymat → `sheet_sync_error`, katakka tegilmaydi.
+- **Excel import:** har sahifa o'z faylini qabul qiladi (`/api/sheets/import?kind=REPORTS|WORKS`); fayl turi sarlavhadan
+  aniqlanadi va sahifaga mos kelmasa rad etiladi. Avval dry-run (ROLLBACK bilan haqiqiy mantiq), bir xil fayl (SHA-256)
+  qayta yozilmaydi. Avtomatik ajratib bo'lmagan qatorlar "Qo'lda tekshirish" ro'yxatiga tushadi.
+  Google Sheets sinxron V19 da olib tashlangan (ishlatilmagan).
 
 ## Deploy (qisqacha)
 
@@ -104,8 +105,6 @@ scripts/backup.sh            kunlik zaxira
    `proxy_buffering off; proxy_read_timeout 1h;` (`/api/events`). SPA uchun `try_files $uri /index.html`.
 5. Zaxira: `BACKUP_ENABLED=true` yoki cron (`scripts/backup.sh` ichida misol). Tiklash: [docs/restore.md](docs/restore.md).
 6. Telegram: @BotFather'dan token → `TELEGRAM_BOT_TOKEN`. Xodim profil sahifasidan kod olib, botga `/start <kod>` yuboradi.
-7. Google Sheets: service account yarating, JSON kalitni serverga qo'ying (`GOOGLE_SERVICE_ACCOUNT_FILE`), jadvalni
-   service account email'iga "Muharrir" sifatida ulashing. Sheets sahifasida varaq nomi va oyni ulang.
 
 ## Ochiq masalalar — `TODO(tasdiqlash)`
 
@@ -132,7 +131,7 @@ scripts/backup.sh            kunlik zaxira
 | 6.2–6.3 | ✅ | Seed AYNAN jadvaldan; testlar matritsani tekshiradi |
 | 6.4–6.7 | ✅ | Taymer, ranglar, undo, eslatma (muddat o'tsa bir marta) |
 | 6.8–6.11 | ✅ | |
-| 7. Sheets | ✅ | Google qismi haqiqiy jadvalda sinab ko'rilmagan (kalit yo'q); mantiq xotiradagi adapter bilan testlangan |
+| 7. Sheets | ✅ (o'zgartirilgan) | Google sinxron olib tashlandi (rahbar qarori): faqat Excel import, har sahifada o'z fayli |
 | 8. Yo'q narsalar | ✅ | Mijozga xabar yuborilmaydi; `.xlsx` yuklash faqat bir martalik import uchun |
 | 9. Zaxira/xavfsizlik | ✅ | HTTPS — nginx darajasida |
 

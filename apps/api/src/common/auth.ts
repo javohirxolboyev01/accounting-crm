@@ -4,7 +4,7 @@ import { config } from '../config';
 import { one, pool } from '../db';
 import { AppError, forbidden } from './errors';
 
-export type Role = 'LEADER' | 'ACCOUNTANT';
+export type Role = 'LEADER' | 'ACCOUNTANT' | 'OPERATOR';
 
 export interface AuthUser {
   id: number;
@@ -45,6 +45,8 @@ export async function userFromToken(token: string | undefined): Promise<AuthUser
 }
 
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
+  // app.ts'dagi rol guardi bilan ikki marta chaqirilsa, bazaga qayta so'ralmaydi
+  if (req.user) return next();
   const h = req.headers.authorization;
   const token = h?.startsWith('Bearer ') ? h.slice(7) : undefined;
   req.user = await userFromToken(token);
@@ -60,6 +62,8 @@ export function requireRole(...roles: Role[]) {
 }
 
 export const requireLeader = requireRole('LEADER');
+/** Buxgalteriya ishi (mijozlar, vazifalar, jadval): operatorga yopiq */
+export const requireStaff = requireRole('LEADER', 'ACCOUNTANT');
 
 export function me(req: Request): AuthUser {
   if (!req.user) throw new AppError(401, 'UNAUTHORIZED', 'Avtorizatsiya talab qilinadi');

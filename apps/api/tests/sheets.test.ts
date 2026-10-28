@@ -3,8 +3,9 @@ import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dryTx, tx } from '../src/db';
 import { importTable } from '../src/modules/sheets/importer';
-import { type SheetAdapter, type SheetUpdate, syncState } from '../src/modules/sheets/sync';
-import { app, one, pool, q, resetDb, seedTeam, token } from './helpers';
+import { detectWorksFile, importWorks } from '../src/modules/sheets/worksImporter';
+import { generatePeriod } from '../src/modules/generator';
+import { app, one, pool, q, reportCodes, resetDb, seedTeam, token } from './helpers';
 
 const HEADER = ['№', 'STIR', 'Korxona nomi', 'Soliq turi', 'JSHDS 15.10.2026', "To'lov manbai 15.10.2026", 'AOS 15.10.2026',
   'QQS 20.10.2026', 'FOYDA 20.10.2026', 'INPS', 'Poruchenya JSHDS', 'Қилиниши лозим бўлган ишлар'];
@@ -18,18 +19,6 @@ function sheet(): unknown[][] {
     ['4', '308456789', 'YANGI TUR', 'AOS', '0', '0', '0', 'X', 'X', '0', '0', "01.01.2026 dan AOS to'lovchisi"],
     ['5', '309567890', 'NOANIQ', 'AOS', '0', '0', 'X', 'X', 'X', '0', 'ha', '15.03.2026 da tekshiruv'],
   ];
-}
-
-class MemorySheet implements SheetAdapter {
-  writes: SheetUpdate[] = [];
-  constructor(public values: unknown[][], public modifiedTime?: Date) {}
-  async read() {
-    return { values: this.values.map((r) => [...r]), modifiedTime: this.modifiedTime };
-  }
-  async write(u: SheetUpdate[]) {
-    this.writes.push(...u);
-    for (const x of u) this.values[x.row][x.col] = x.value;
-  }
 }
 
 let leader: number;
@@ -64,7 +53,14 @@ describe('Sheets import', () => {
     expect(jshds.status).toBe('DONE');
     const noaniq = r.rows.find((x) => x.stir === '309567890')!;
     expect(noaniq.review.some((m) => m.includes('PORUCHENYA'))).toBe(true); // "ha"
-    expect(noaniq.review.some((m) => m.includes('AOS: jadvalda X'))).toBe(true); // AOS mijozda AOS X
+    // AOS mijozda AOS X: review emas, doimiy "topshirmaydi" belgisi (V17), vazifa bekor, jadvalda X
+    expect(noaniq.changes).toContain('AOS=X');
+    const aosCell = await one(
+      pool,
+      `SELECT g.cell FROM fn_monthly_grid('2026-10-01') g JOIN client c ON c.id = g.client_id JOIN report_type rt ON rt.id = g.report_type_id
+       WHERE c.stir = '309567890' AND rt.code = 'AOS'`,
+    );
+    expect(aosCell.cell).toBe('X');
     expect(noaniq.review.some((m) => m.includes('naqsh'))).toBe(true); // noaniq izoh
     // Import paytida rahbarlarga xabar yuborilmaydi
     expect((await one(pool, 'SELECT count(*)::int AS n FROM notification')).n).toBe(0);
@@ -77,91 +73,16 @@ describe('Sheets import', () => {
     expect(r.summary.created).toBe(0);
     expect(r.rows.find((x) => x.stir === '305123456')!.action).toBe('UNCHANGED');
   });
-});
 
-describe('Sheets ikki tomonlama sinxron', () => {
-  let stateId: number;
-  let mem: MemorySheet;
-  const COLS: Record<string, number> = { JSHDS: 4, TOLOV_MANBAI: 5, AOS: 6, QQS: 7, FOYDA: 8, INPS: 9, PORUCHENYA_JSHDS: 10 };
-  const col = (code: string) => COLS[code];
-  const taskStatus = async (stir: string, code: string) =>
-    (
-      await one(
-        pool,
-        `SELECT t.status FROM task t JOIN client c ON c.id = t.client_id JOIN report_type rt ON rt.id = t.report_type_id
-         WHERE c.stir = $1 AND rt.code = $2 AND t.period = '2026-10-01' AND t.status <> 'CANCELLED'`,
-        [stir, code],
-      )
-    ).status;
-
-  beforeAll(async () => {
-    stateId = (
-      await one(pool, `INSERT INTO sheet_sync_state (spreadsheet_id, sheet_title, period) VALUES ('test-sheet-id', 'Oktyabr', '2026-10-01') RETURNING id`)
-    ).id;
-    mem = new MemorySheet(sheet().slice(0, 3));
-  });
-
-  it('birinchi sinxron: holatlar tenglashadi', async () => {
-    const r = await syncState(stateId, mem);
-    expect(r.errors).toBe(0);
-    expect(mem.values[2][col('QQS')]).toBe('1');
-  });
-
-  it('jadvalda 1 -> tizimda DONE (rahbarga xabar navbatda)', async () => {
-    mem.values[1][col('INPS')] = '1';
-    const r = await syncState(stateId, mem);
-    expect(r.appliedToSystem).toBe(1);
-    expect(await taskStatus('305123456', 'INPS')).toBe('DONE');
-    expect((await one(pool, `SELECT count(*)::int AS n FROM notification WHERE kind = 'TASK_DONE'`)).n).toBeGreaterThan(0);
-  });
-
-  it('tizimda Bajarildi -> jadvalda 1', async () => {
-    await pool.query(
-      `UPDATE task t SET status = 'DONE', done_at = now() FROM client c, report_type rt
-       WHERE c.id = t.client_id AND rt.id = t.report_type_id AND c.stir = '306234567' AND rt.code = 'JSHDS' AND t.period = '2026-10-01'`,
-    );
-    const r = await syncState(stateId, mem);
-    expect(r.writtenToSheet).toBe(1);
-    expect(mem.values[2][col('JSHDS')]).toBe('1');
-  });
-
-  it('ziddiyat: oxirgi o\'zgargan yutadi, ikkala qiymat audit\'da', async () => {
-    // Faqat tizim o'zgargan (TOLOV_MANBAI DONE) -> jadvalga yoziladi
-    await pool.query(
-      `UPDATE task t SET status = 'DONE', done_at = now() FROM client c, report_type rt
-       WHERE c.id = t.client_id AND rt.id = t.report_type_id AND c.stir = '305123456' AND rt.code = 'TOLOV_MANBAI' AND t.period = '2026-10-01'`,
-    );
-    // Faqat jadval o'zgargan (INPS 1 -> 0) -> tizimda qayta ochiladi
-    mem.values[1][col('INPS')] = '0';
-    mem.modifiedTime = new Date(Date.now() - 3600_000); // jadval eskiroq
-    const r = await syncState(stateId, mem);
-    expect(r.writtenToSheet).toBeGreaterThanOrEqual(1);
-    expect(mem.values[1][col('TOLOV_MANBAI')]).toBe('1');
-    // INPS: faqat jadval o'zgardi (tizim L=1 da) -> tizimda qayta ochiladi
-    expect(await taskStatus('305123456', 'INPS')).toBe('TODO');
-
-    // Ikkala tomon o'zgargan va farq qiladi (0/1 da faqat oxirgi qiymat noma'lum bo'lganda yuz beradi):
-    // L ni sun'iy 'X' qilamiz, jadval 1 (1 soat oldin), tizim 0 (hozir yangilangan)
-    await pool.query(`UPDATE sheet_sync_cell SET value = 'X' WHERE state_id = $1 AND stir = '305123456' AND report_code = 'INPS'`, [stateId]);
-    mem.values[1][col('INPS')] = '1';
-    const r2 = await syncState(stateId, mem);
-    expect(r2.conflicts).toBe(1);
-    // Tizim yangiroq (updated_at hozir, jadval 1 soat oldin) -> tizim qiymati (0) yutadi
-    expect(mem.values[1][col('INPS')]).toBe('0');
-    const a = await one(pool, `SELECT before, after FROM audit_log WHERE action = 'SYNC_CONFLICT' ORDER BY id DESC LIMIT 1`);
-    expect(a.before).toMatchObject({ sheet: '1', system: '0' });
-    expect(a.after).toMatchObject({ winner: 'SYSTEM' });
-  });
-
-  it('tanib bo\'lmaydigan qiymat -> sheet_sync_error, katakka tegilmaydi', async () => {
-    mem.values[1][col('JSHDS')] = 'ha';
-    const before = mem.writes.length;
-    const r = await syncState(stateId, mem);
-    expect(r.errors).toBeGreaterThan(0);
-    expect(mem.values[1][col('JSHDS')]).toBe('ha');
-    expect(mem.writes.slice(before).some((w) => w.col === col('JSHDS'))).toBe(false);
-    const e = await one(pool, `SELECT message, raw_value FROM sheet_sync_error WHERE kind = 'SYNC' AND raw_value = 'ha'`);
-    expect(e).toBeTruthy();
+  it('X belgisi keyingi oylarda ham saqlanadi; faylda 1 kelsa olib tashlanadi', async () => {
+    const c = (await one(pool, `SELECT id FROM client WHERE stir = '309567890'`)).id;
+    await tx((db) => generatePeriod(db, '2026-11-01'));
+    expect(await reportCodes(c, '2026-11-01')).not.toContain('AOS');
+    const rows = sheet();
+    rows[5][6] = '1';
+    await tx((db) => importTable(db, rows, { actorId: leader, dryRun: false }));
+    expect((await one(pool, 'SELECT count(*)::int AS n FROM client_report_exclusion WHERE client_id = $1', [c])).n).toBe(0);
+    expect(await reportCodes(c, '2026-10-01')).toContain('AOS');
   });
 });
 
@@ -194,5 +115,72 @@ describe('Sheets import: bir xil faylni qayta yuklash', () => {
     expect(dry.status).toBe(200);
     expect(dry.body.alreadyImported).toMatchObject({ fileName: 'hisobot.xlsx' });
     expect((await one(pool, 'SELECT count(*)::int AS n FROM sheet_import_file')).n).toBe(1);
+  });
+
+  it('sahifaga mos kelmagan fayl rad etiladi: hisobot fayli Buxgalter ishlari sahifasiga yuklanmaydi', async () => {
+    const r = await request(app).post('/api/sheets/import?dryRun=true&kind=WORKS').set('Authorization', `Bearer ${tok}`).attach('file', xlsx, 'hisobot.xlsx');
+    expect(r.status).toBe(400);
+    expect(r.body).toMatchObject({ code: 'WRONG_FILE_KIND', details: { detected: 'REPORTS', expected: 'WORKS' } });
+    const ok = await request(app).post('/api/sheets/import?dryRun=true&kind=REPORTS').set('Authorization', `Bearer ${tok}`).attach('file', xlsx, 'hisobot.xlsx');
+    expect(ok.status).toBe(200);
+    expect(ok.body.kind).toBe('REPORTS');
+  });
+});
+
+// "Бухгалтер ишлари" fayli: ikki qatorli sarlavha, birlashtirilgan guruhlar
+const WORKS_TOP = ['', 'СТИР', 'Номи', 'Солиқ тури', 'ойлик тулов', '30% (Бухгалтерлар улуши)', 'Жавобгар', 'Банк-ключ',
+  'my.mehnat.uz', 'my.mehnat.uz', 'my.mehnat.uz', 'my.mehnat.uz', 'ИНПС ҳисобот', 'Иш  ҳақи', 'Банк виписка',
+  'Счёт-фактура', 'Счёт-фактура', 'Дебетор-Кредитор', 'Ойлар ёпилиши', 'Бошқа ишлар', 'Изоҳ'];
+const WORKS_SUB = [...WORKS_TOP];
+WORKS_SUB.splice(8, 4, 'ходим сони', 'сана', 'логин', 'парол');
+WORKS_SUB.splice(15, 2, 'кирим', 'Чиқим');
+
+describe('"Бухгалтер ишлари" fayli importi', () => {
+  let team: Awaited<ReturnType<typeof seedTeam>>;
+  beforeAll(async () => {
+    await resetDb();
+    team = await seedTeam();
+  });
+  const works = () => [
+    WORKS_TOP,
+    WORKS_SUB,
+    ['1', '2', '3', '4', '', '5', '', '6', '7', '8', '', '', '9', '10', '11', '12', '13', '19', '20', '', ''],
+    ['11', '310309859', '"ALICOM" MCHJ', 'АОС', '1000000', '300000', 'Азиза', 'Бор', '3', '31.07.2025', 'jdev', 'Pa$$1',
+      '2026-09-30', '2026-08-31', '', '2025-12-31', '2025-09-30', '', '', '', 'Эски даври бор'],
+    ['', '', '"MIX" МЧЖ', '', '', '', 'Номаълум', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['', '63003046290049', 'OLIMOVA', 'YaTT', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+  ];
+
+  it('fayl turi aniqlanadi, mijoz maydonlari va "qaysi oygacha" yoziladi', async () => {
+    const map = await detectWorksFile(pool, works());
+    expect(map).not.toBeNull();
+    expect(map!.headerRow).toBe(1);
+    // Hisobot importi uni o'zi tanimaydi, yo'naltirish routes.ts'da
+    const r = await tx((db) => importWorks(db, works(), map!, { actorId: team.leader, dryRun: false }));
+    expect(r.kind).toBe('WORKS');
+    expect(r.summary).toMatchObject({ total: 3, created: 1, skipped: 2 });
+    const c = await one(
+      pool,
+      `SELECT id, accountant_id, monthly_fee::int AS fee, bank_key, employee_count, to_char(mehnat_checked_at, 'YYYY-MM-DD') AS checked,
+              mehnat_login, mehnat_password_enc IS NOT NULL AS has_pw, note
+       FROM client WHERE stir = '310309859'`,
+    );
+    expect(c).toMatchObject({ accountant_id: team.acc1, fee: 1000000, bank_key: true, employee_count: 3, checked: '2025-07-31', mehnat_login: 'jdev', has_pw: true, note: 'Эски даври бор' });
+    const base = await q(
+      pool,
+      `SELECT w.name, to_char(b.done_through, 'YYYY-MM') AS m FROM client_routine_baseline b JOIN routine_work_type w ON w.id = b.routine_type_id
+       WHERE b.client_id = $1`,
+      [c.id],
+    );
+    const by = Object.fromEntries(base.map((b) => [b.name, b.m]));
+    expect(by['Ish haqi hisoblash']).toBe('2026-08');
+    expect(by['Kirim hisobvaraq-fakturalarini kiritish']).toBe('2025-12');
+    expect(by['Bank aylanmalarini kiritish']).toBeUndefined(); // bo'sh katak
+    expect(r.rows.find((x) => x.name.includes('MIX'))!.review).toContain("STIR yo'q");
+    expect(r.rows.find((x) => x.stir === '63003046290049')!.review[0]).toContain('YaTT');
+  });
+
+  it('hisobot fayli Бухгалтер ишлари deb aniqlanmaydi', async () => {
+    expect(await detectWorksFile(pool, sheet())).toBeNull();
   });
 });

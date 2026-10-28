@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { useAccountants } from '@/hooks/tasks';
 import { api } from '@/lib/api';
 import { errorText } from '@/lib/errors';
-import type { ClientCard, ClientStatus, TaxType } from '@/lib/types';
+import type { ClientStatus, Lead, TaxType } from '@/lib/types';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
 import { DatePicker } from './ui/date-picker';
@@ -15,8 +15,11 @@ import { Select } from './ui/select';
 
 const empty = { stir: '', name: '', contactPerson: '', phone: '', taxType: 'AOS' as TaxType, taxTypeEffectiveFrom: '', accountantId: '', status: 'ACTIVE' as ClientStatus, note: '' };
 
-/** Yangi mijoz (faqat rahbar): alohida sahifa emas, mijozlar ro'yxati ustidagi modal. Yaratilgach mijoz kartasiga o'tadi. */
-export function NewClientDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * Yangi mijoz (faqat rahbar): alohida sahifa emas, mijozlar ro'yxati ustidagi modal. Yaratilgach mijoz kartasiga o'tadi.
+ * lead berilsa — operator topgan firmani mijozga aylantirish: forma uning ma'lumotlari bilan to'ldiriladi.
+ */
+export function NewClientDialog({ open, onClose, lead }: { open: boolean; onClose: () => void; lead?: Lead | null }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -25,12 +28,12 @@ export function NewClientDialog({ open, onClose }: { open: boolean; onClose: () 
   const set = (patch: Partial<typeof empty>) => setForm({ ...form, ...patch });
 
   useEffect(() => {
-    if (open) setForm(empty);
-  }, [open]);
+    if (open) setForm(lead ? { ...empty, stir: lead.stir, name: lead.name, contactPerson: lead.director ?? '', phone: lead.phone ?? '' } : empty);
+  }, [open, lead]);
 
   const create = useMutation({
     mutationFn: () =>
-      api.post<ClientCard>('/clients', {
+      api.post<{ id?: number; clientId?: number }>(lead ? `/leads/${lead.id}/convert` : '/clients', {
         stir: form.stir,
         name: form.name,
         contactPerson: form.contactPerson || null,
@@ -44,8 +47,9 @@ export function NewClientDialog({ open, onClose }: { open: boolean; onClose: () 
     onSuccess: (c) => {
       toast.success(t('common.saved'));
       void qc.invalidateQueries({ queryKey: ['clients'] });
+      void qc.invalidateQueries({ queryKey: ['leads'] });
       onClose();
-      navigate(`/clients/${c.id}`);
+      navigate(`/clients/${c.clientId ?? c.id}`);
     },
     onError: (e) => toast.error(errorText(e, t)),
   });
@@ -54,7 +58,7 @@ export function NewClientDialog({ open, onClose }: { open: boolean; onClose: () 
     <Dialog
       open={open}
       onClose={onClose}
-      title={t('clients.new')}
+      title={lead ? t('leads.convertTitle', { name: lead.name }) : t('clients.new')}
       className="max-w-2xl"
       footer={
         <>

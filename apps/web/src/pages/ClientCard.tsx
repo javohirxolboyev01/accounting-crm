@@ -19,7 +19,7 @@ import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import { errorText } from '@/lib/errors';
-import { currentMonth, fmtDate, fmtDateTime, fmtShortDue, quarterOfPrevMonth } from '@/lib/time';
+import { currentMonth, fmtDate, fmtDateTime, fmtShortDue, monthLabel } from '@/lib/time';
 import type { AuditItem, ClientCard as ClientCardData, ClientStatus, Task, TaxType } from '@/lib/types';
 
 interface Form {
@@ -78,7 +78,6 @@ export default function ClientCard() {
   const accountants = useAccountants();
   const [form, setForm] = useState<Form>(empty);
   const [confirmTax, setConfirmTax] = useState(false);
-  const [quarter, setQuarter] = useState(quarterOfPrevMonth());
 
   const q = useQuery({ queryKey: ['client', id], queryFn: () => api.get<ClientCardData>(`/clients/${id}`) });
   const history = useQuery({ queryKey: ['client', id, 'history'], queryFn: () => api.get<AuditItem[]>(`/clients/${id}/history`) });
@@ -130,11 +129,20 @@ export default function ClientCard() {
     onError: onErr,
   });
   const dividend = useMutation({
-    mutationFn: (p: { quarter: string; on: boolean }) =>
-      p.on ? api.put(`/clients/${id}/dividend/${p.quarter}`) : api.del(`/clients/${id}/dividend/${p.quarter}`),
+    mutationFn: (p: { month: string; on: boolean }) =>
+      p.on ? api.put(`/clients/${id}/dividend/${p.month}`) : api.del(`/clients/${id}/dividend/${p.month}`),
     onSuccess: refresh,
     onError: onErr,
   });
+  const include = useMutation({
+    mutationFn: (reportTypeId: number) => api.del(`/clients/${id}/report-exclusions/${reportTypeId}`),
+    onSuccess: refresh,
+    onError: onErr,
+  });
+
+  const thisMonth = currentMonth();
+  const months = t('months', { returnObjects: true }) as string[];
+  const dividendNow = !!q.data?.dividendMonths?.includes(thisMonth);
 
   const taxChanged = q.data && (form.taxType !== q.data.taxType || (form.taxTypeEffectiveFrom || '') !== (q.data.taxTypeEffectiveFrom ?? ''));
   const submit = (e: React.FormEvent) => {
@@ -251,20 +259,46 @@ export default function ClientCard() {
             <CardHeader title={t('clients.dividend')} />
             <div className="space-y-3 p-4 text-sm">
               <p className="text-xs text-gray-500">{t('clients.dividendHint')}</p>
-              <div className="flex gap-2">
-                <Input value={quarter} onChange={(e) => setQuarter(e.target.value.toUpperCase())} placeholder="2026-Q3" aria-label={t('clients.dividendQuarter')} />
-                <Button variant="outline" disabled={!/^\d{4}-Q[1-4]$/.test(quarter)} onClick={() => dividend.mutate({ quarter, on: true })}>{t('clients.markDividend')}</Button>
-              </div>
+              {/* Faqat joriy oy belgilanadi (server ham tekshiradi); o'tgan oylar tarix sifatida */}
+              <Button
+                variant={dividendNow ? 'default' : 'outline'}
+                onClick={() => dividend.mutate({ month: thisMonth, on: !dividendNow })}
+                disabled={dividend.isPending}
+              >
+                {t(dividendNow ? 'clients.unmarkDividend' : 'clients.markDividend', { month: monthLabel(thisMonth, months) })}
+              </Button>
               <ul className="flex flex-wrap gap-2">
-                {q.data.dividendQuarters?.map((dq) => (
-                  <li key={dq} className="inline-flex items-center gap-1 rounded-full border bg-gray-50 px-2 py-0.5 text-xs">
-                    {dq}
-                    <button onClick={() => dividend.mutate({ quarter: dq, on: false })} aria-label={t('common.delete')}><Trash2 className="h-3 w-3 text-gray-400 hover:text-red-600" /></button>
+                {q.data.dividendMonths?.map((dm) => (
+                  <li key={dm} className="inline-flex items-center rounded-full border bg-gray-50 px-2 py-0.5 text-xs">
+                    {monthLabel(dm, months)}
                   </li>
                 ))}
               </ul>
             </div>
           </Card>
+          {q.data.reportExclusions?.length > 0 && (
+            <Card>
+              <CardHeader title={t('clients.reportExclusions')} />
+              <div className="space-y-3 p-4 text-sm">
+                <p className="text-xs text-gray-500">{t('clients.reportExclusionsHint')}</p>
+                <ul className="space-y-1.5">
+                  {q.data.reportExclusions.map((e) => (
+                    <li key={e.reportTypeId} className="flex items-center justify-between gap-2">
+                      <span>
+                        {i18n.language === 'ru' ? e.nameRu : e.name}
+                        <span className="ml-2 text-xs text-gray-500">{t('clients.excludedSince', { month: monthLabel(e.effectiveFrom, months) })}</span>
+                      </span>
+                      {isLeader && (
+                        <Button size="sm" variant="outline" disabled={include.isPending} onClick={() => include.mutate(e.reportTypeId)}>
+                          {t('clients.includeReport')}
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Card>
+          )}
         </div>
       )}
       <Card className="xl:col-span-2">

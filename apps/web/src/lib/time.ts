@@ -49,8 +49,3 @@ export function fmtDuration(sec: number) {
   const m = Math.floor((sec % 3600) / 60);
   return h ? `${h}:${String(m).padStart(2, '0')}` : `0:${String(m).padStart(2, '0')}`;
 }
-
-export const quarterOfPrevMonth = () => {
-  const d = DateTime.now().setZone(TZ).minus({ months: 1 });
-  return `${d.year}-Q${d.quarter}`;
-};

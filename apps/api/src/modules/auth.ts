@@ -4,12 +4,12 @@ import type { Response } from 'express';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { me, requireAuth, signAccessToken } from '../common/auth';
+import { me, type Role, requireAuth, signAccessToken } from '../common/auth';
 import { audit, diff } from '../common/audit';
 import { AppError, parse } from '../common/errors';
 import { config } from '../config';
 import { one, pool, tx } from '../db';
-import { NOTIFICATION_KINDS } from './notifications';
+import { NOTIFICATION_KINDS, notificationKindsFor } from './notifications';
 import { telegramEnabled } from './telegram';
 
 const MAX_FAILED = 5;
@@ -21,7 +21,7 @@ export const passwordSchema = z.string().min(8, 'Parol kamida 8 belgi').max(200)
 
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
-async function issueTokens(res: Response, userId: number, role: 'LEADER' | 'ACCOUNTANT', replaceId?: number) {
+async function issueTokens(res: Response, userId: number, role: Role, replaceId?: number) {
   const raw = crypto.randomBytes(48).toString('base64url');
   const rt = await one<{ id: number }>(
     pool,
@@ -122,7 +122,7 @@ meRouter.use(requireAuth);
 
 meRouter.get('/', async (req, res) => {
   const user = await one(pool, `SELECT ${PROFILE} FROM app_user WHERE id = $1`, [me(req).id]);
-  res.json({ ...user, telegramBotEnabled: telegramEnabled(), telegramBotUsername: config.telegram.username || null, notificationKinds: NOTIFICATION_KINDS });
+  res.json({ ...user, telegramBotEnabled: telegramEnabled(), telegramBotUsername: config.telegram.username || null, notificationKinds: notificationKindsFor(user.role) });
 });
 
 const prefsSchema = z.record(

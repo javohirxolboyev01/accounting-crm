@@ -1,0 +1,331 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, ClipboardCheck, DatabaseZap, Download, Eye, ShieldCheck, Upload } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
+import { invalidateTasks } from '@/hooks/tasks';
+import { ApiError, api, qs } from '@/lib/api';
+import { cn } from '@/lib/cn';
+import { errorText } from '@/lib/errors';
+import { fmtDateTime } from '@/lib/time';
+import type { ImportReport, PreviousImport, ReviewItem } from '@/lib/types';
+import { FileDrop } from './FileDrop';
+import { Button } from './ui/button';
+import { Badge } from './ui/card';
+import { MonthPicker } from './ui/date-picker';
+import { Dialog } from './ui/dialog';
+import { Field } from './ui/input';
+import { Empty } from './ui/states';
+
+// Excel import har sahifaning o'zida (Google Sheets sinxron olib tashlangan):
+// "Hisobot topshirish" — hisobot jadvali (REPORTS), "Buxgalter ishlari" — «Бухгалтер ишлари» fayli (WORKS).
+// Server fayl turini sarlavhadan aniqlaydi va sahifaga mos kelmasa rad etadi.
+export type ImportKind = ImportReport['kind'];
+
+const actionCls = {
+  NEW: 'border-green-300 bg-green-50 text-green-700',
+  UPDATED: 'border-blue-300 bg-blue-50 text-blue-700',
+  UNCHANGED: 'border-gray-200 text-gray-500',
+  SKIPPED: 'border-red-300 bg-red-50 text-red-700',
+};
+
+type RowFilter = 'ALL' | 'NEW' | 'UPDATED' | 'UNCHANGED' | 'SKIPPED' | 'REVIEW';
+
+/** 1 → 2 → 3 qadamlar: fayl tanlash, tekshirish (bazaga yozilmaydi), CRM'ga yuklash */
+function ImportSteps({ step }: { step: 1 | 2 | 3 | 4 }) {
+  const { t } = useTranslation();
+  const steps = [t('sheets.step.choose'), t('sheets.step.preview'), t('sheets.step.apply')];
+  return (
+    <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      {steps.map((label, i) => {
+        const n = i + 1;
+        const done = step > n;
+        const active = step === n;
+        return (
+          <li key={label} className="flex items-center gap-2">
+            {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-gray-400" aria-hidden />}
+            <span
+              className={cn(
+                'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold',
+                done ? 'bg-green-600 text-on-brand' : active ? 'bg-brand-500 text-on-brand' : 'bg-gray-100 text-gray-500',
+              )}
+            >
+              {done ? <Check className="h-3 w-3" /> : n}
+            </span>
+            <span className={cn(active ? 'font-medium text-gray-900' : 'text-gray-500')}>{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function ImportDialog({ kind, open, onClose }: { kind: ImportKind; open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [file, setFile] = useState<File | null>(null);
+  const [month, setMonth] = useState('');
+  const [report, setReport] = useState<ImportReport | null>(null);
+  const [filter, setFilter] = useState<RowFilter>('ALL');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setFile(null);
+    setMonth('');
+    setReport(null);
+    setFilter('ALL');
+  }, [open]);
+
+  // Kiritilgan narsa o'zgarsa eski natija endi unga tegishli emas
+  const resetReport = () => { setReport(null); setFilter('ALL'); };
+
+  const warnDuplicate = (p: PreviousImport) =>
+    toast.warning(t('sheets.alreadyImported'), {
+      description: t('sheets.alreadyImportedDesc', { name: p.fileName, at: fmtDateTime(p.importedAt), by: p.importedBy ?? '—' }),
+      duration: 8000,
+    });
+
+  const run = useMutation({
+    mutationFn: (dryRun: boolean) => {
+      const fd = new FormData();
+      fd.append('file', file!);
+      return api.post<ImportReport>(`/sheets/import${qs({ dryRun, kind, month: month || undefined })}`, fd);
+    },
+    onSuccess: (r) => {
+      setReport(r);
+      setFilter('ALL');
+      if (r.alreadyImported) warnDuplicate(r.alreadyImported);
+      if (!r.dryRun) {
+        toast.success(t('sheets.imported', { created: r.summary.created, updated: r.summary.updated }));
+        setFile(null);
+        invalidateTasks(qc);
+        void qc.invalidateQueries({ queryKey: ['sheets'] });
+      }
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'FILE_ALREADY_IMPORTED') warnDuplicate(e.details as PreviousImport);
+      else if (e instanceof ApiError && e.code === 'WRONG_FILE_KIND') toast.error(t(`sheets.wrongKind.${kind}`), { duration: 8000 });
+      else toast.error(errorText(e, t));
+    },
+  });
+
+  const downloadCsv = () => {
+    if (!report) return;
+    const url = URL.createObjectURL(new Blob([report.csv], { type: 'text/csv;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `import-${report.period}${report.dryRun ? '-dry-run' : ''}.csv` });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const previewed = !!report?.dryRun;
+  const duplicate = !!report?.alreadyImported;
+  const step = report && !report.dryRun ? 4 : previewed ? 3 : file ? 2 : 1;
+  // Tekshirmasdan yuklashda bir marta so'raladi: rahbar nima yozilishini ko'rmagan
+  const apply = () => (previewed ? run.mutate(false) : setConfirmOpen(true));
+
+  const s = report?.summary;
+  const tiles: { key: RowFilter; label: string; value: number; cls: string }[] = s
+    ? [
+        { key: 'ALL', label: t('common.total'), value: s.total, cls: 'text-gray-900' },
+        { key: 'NEW', label: t('sheets.new'), value: s.created, cls: 'text-green-700' },
+        { key: 'UPDATED', label: t('sheets.updated'), value: s.updated, cls: 'text-blue-700' },
+        { key: 'UNCHANGED', label: t('sheets.unchanged'), value: s.unchanged, cls: 'text-gray-600' },
+        { key: 'SKIPPED', label: t('sheets.skipped'), value: s.skipped, cls: 'text-red-700' },
+        { key: 'REVIEW', label: t('sheets.review'), value: s.review, cls: 'text-amber-700' },
+      ]
+    : [];
+  const rows = (report?.rows ?? []).filter((r) =>
+    filter === 'ALL' ? true : filter === 'REVIEW' ? r.review.length > 0 : r.action === filter,
+  );
+
+  return (
+    <>
+      <Dialog open={open} onClose={onClose} title={t(`sheets.importTitle.${kind}`)} className="max-w-4xl">
+        <div className="space-y-5 text-sm">
+          <p className="text-gray-500">{t(`sheets.fileHintFor.${kind}`)}</p>
+          <ImportSteps step={step} />
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-2">
+              <Field label={t('sheets.file')}><FileDrop file={file} onChange={(f) => { setFile(f); resetReport(); }} /></Field>
+            </div>
+            <Field label={t('sheets.period')} hint={t('sheets.periodHint')}><MonthPicker value={month} onChange={(v) => { setMonth(v); resetReport(); }} /></Field>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-gray-200 p-3">
+              <Button variant="outline" className="w-full" disabled={!file || run.isPending} loading={run.isPending && run.variables === true} onClick={() => run.mutate(true)}>
+                <Eye className="h-4 w-4" /> {t('sheets.dryRun')}
+              </Button>
+              <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-500">
+                <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden /> {t('sheets.dryRunHint')}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-3">
+              <Button className="w-full" disabled={!file || duplicate || run.isPending} loading={run.isPending && run.variables === false} onClick={apply}>
+                <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
+              </Button>
+              <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-500">
+                <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden /> {t('sheets.applyHint')}
+              </p>
+            </div>
+          </div>
+
+          {report && s && (
+            <div className="space-y-3">
+              {report.dryRun ? (
+                duplicate ? (
+                  <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+                    <div>
+                      <div className="font-semibold">{t('sheets.alreadyImported')}</div>
+                      <div className="text-xs">{t('sheets.alreadyImportedDesc', { name: report.alreadyImported!.fileName, at: fmtDateTime(report.alreadyImported!.importedAt), by: report.alreadyImported!.importedBy ?? '—' })}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-800 dark:bg-brand-950/40">
+                    <Eye className="h-5 w-5 shrink-0 text-brand-600 dark:text-brand-300" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-gray-900">{t('sheets.dryRunResult')} · {report.period}</div>
+                      <div className="text-xs text-gray-600">{t('sheets.dryRunNext')}</div>
+                    </div>
+                    <Button disabled={run.isPending} loading={run.isPending && run.variables === false} onClick={() => run.mutate(false)}>
+                      <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
+                    </Button>
+                  </div>
+                )
+              ) : (
+                <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 p-3 text-green-800">
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+                  <div>
+                    <div className="font-semibold">{t('sheets.importResult')} · {report.period}</div>
+                    <div className="text-xs">{t('sheets.importDone', { cells: s.cellsDone, review: s.review })}</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                {tiles.map((x) => (
+                  <button
+                    key={x.key}
+                    type="button"
+                    onClick={() => setFilter(x.key)}
+                    className={cn(
+                      'cursor-pointer rounded-lg border px-3 py-2 text-left transition-colors',
+                      filter === x.key ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40' : 'border-gray-200 hover:bg-gray-50',
+                    )}
+                  >
+                    <div className={cn('text-lg font-semibold tabular-nums', x.cls)}>{x.value}</div>
+                    <div className="truncate text-xs text-gray-500">{x.label}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                <span>{t('sheets.columns')}: {report.columns.map((c) => c.code).join(', ')} · {t('sheets.cellsDone')}: {s.cellsDone}</span>
+                <Button size="sm" variant="ghost" onClick={downloadCsv}><Download className="h-4 w-4" /> CSV</Button>
+              </div>
+
+              <div className="max-h-80 overflow-auto rounded-md border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 table-head">
+                    <tr><th className="px-3 py-1.5">#</th><th className="px-3 py-1.5">{t('clients.stir')}</th><th className="px-3 py-1.5">{t('clients.name')}</th><th className="px-3 py-1.5">{t('sheets.action')}</th><th className="px-3 py-1.5">{t('sheets.reviewNotes')}</th></tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">{t('sheets.noRows')}</td></tr>}
+                    {rows.map((r) => (
+                      <tr key={r.row} className={cn('border-t', r.review.length && 'bg-amber-50/60')}>
+                        <td className="px-3 py-1.5">{r.row}</td>
+                        <td className="px-3 py-1.5 font-mono">{r.stir}</td>
+                        <td className="px-3 py-1.5">{r.name}</td>
+                        <td className="px-3 py-1.5"><Badge className={actionCls[r.action]}>{t(`sheets.actions.${r.action}`)}</Badge> {r.changes.join(', ')}</td>
+                        <td className="px-3 py-1.5 text-amber-800">{r.review.join('; ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={t('sheets.confirmTitle')}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => { setConfirmOpen(false); run.mutate(true); }}><Eye className="h-4 w-4" /> {t('sheets.dryRun')}</Button>
+            <Button onClick={() => { setConfirmOpen(false); run.mutate(false); }}><DatabaseZap className="h-4 w-4" /> {t('sheets.confirmApply')}</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t('sheets.confirmText')}</p>
+      </Dialog>
+    </>
+  );
+}
+
+/** Import natijasida avtomatik ajratib bo'lmagan qatorlar (izoh, sana va h.k.): rahbar kartada tuzatib "hal qilindi" qiladi */
+function ReviewDialog({ open, onClose, items }: { open: boolean; onClose: () => void; items: ReviewItem[] | undefined }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const resolve = useMutation({
+    mutationFn: (id: number) => api.post(`/sheets/errors/${id}/resolve`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sheets', 'review'] }),
+    onError: (e) => toast.error(errorText(e, t)),
+  });
+  return (
+    <Dialog open={open} onClose={onClose} title={`${t('sheets.manualReview')} (${items?.length ?? 0})`} className="max-w-2xl">
+      {!items?.length ? <Empty /> : (
+        <ul className="divide-y text-sm">
+          {items.map((r) => (
+            <li key={r.id} className="flex items-center gap-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div>{r.message}</div>
+                <div className="text-xs text-gray-500">{r.ref} · {r.stir ?? '—'} · {fmtDateTime(r.occurredAt)}</div>
+              </div>
+              {r.clientId && <Link className="shrink-0 text-xs text-brand hover:underline" to={`/clients/${r.clientId}`} onClick={onClose}>{t('sheets.fixInCard')}</Link>}
+              <Button size="sm" variant="outline" disabled={resolve.isPending} onClick={() => resolve.mutate(r.id)}>{t('sheets.resolve')}</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * Sahifa sarlavhasidagi tugmalar (faqat rahbar): "Qo'lda tekshirish (N)" — ro'yxatda narsa bo'lsa, va "Excel yuklash".
+ * Buxgalter ishlari va Hisobot topshirish sahifalari bir xil komponentni o'z fayl turi bilan ishlatadi.
+ */
+export function SheetImportActions({ kind }: { kind: ImportKind }) {
+  const { t } = useTranslation();
+  const [importOpen, setImportOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const review = useQuery({ queryKey: ['sheets', 'review'], queryFn: () => api.get<ReviewItem[]>('/sheets/review') });
+  const n = review.data?.length ?? 0;
+  return (
+    <>
+      {n > 0 && (
+        <Button variant="outline" onClick={() => setReviewOpen(true)} title={t('sheets.manualReview')}>
+          <ClipboardCheck className="h-4 w-4 text-amber-500" /> {t('sheets.reviewBtn', { n })}
+        </Button>
+      )}
+      <Button variant="outline" onClick={() => setImportOpen(true)}>
+        <Upload className="h-4 w-4" /> {t('sheets.importBtn')}
+      </Button>
+      {/* Tugmalar PageHeader ichida (sticky z-30 — o'z qatlami): oynalar body'ga chiqariladi, aks holda sidebar ostida qoladi */}
+      {createPortal(
+        <>
+          <ImportDialog kind={kind} open={importOpen} onClose={() => setImportOpen(false)} />
+          <ReviewDialog open={reviewOpen} onClose={() => setReviewOpen(false)} items={review.data} />
+        </>,
+        document.body,
+      )}
+    </>
+  );
+}

@@ -1,14 +1,15 @@
-import { config } from './config';
-import { currentPeriod } from './common/time';
-import { one, pool, tx } from './db';
-import { migrate } from './migrate';
-import { hashPassword } from './modules/auth';
-import { createClient } from './modules/clients';
-import { runGenerator } from './modules/generator';
+import { config } from '../src/config';
+import { currentPeriod } from '../src/common/time';
+import { one, pool, tx } from '../src/db';
+import { migrate } from '../src/migrate';
+import { hashPassword } from '../src/modules/auth';
+import { createClient } from '../src/modules/clients';
+import { runGenerator } from '../src/modules/generator';
 
-// Faqat dev: 1 rahbar, 3 buxgalter, 10 namuna mijoz (AOS, QQS, ZERO_REPORT, LIQUIDATING)
-export async function seedDev() {
-  if (config.isProd) throw new Error('Dev seed prod muhitida ishlatilmaydi');
+// Faqat Playwright e2e bazasi uchun (e2e-server.ts): 1 rahbar, 3 buxgalter, 1 sotuv operatori, 10 namuna mijoz.
+// Dev/prod bazaga demo ma'lumot yozilmaydi: birinchi rahbar .env BOOTSTRAP_LEADER_* dan yaratiladi.
+export async function seedE2e() {
+  if (config.isProd) throw new Error('E2E seed prod muhitida ishlatilmaydi');
   await migrate();
   const exists = await one<{ n: number }>(pool, 'SELECT count(*) AS n FROM client');
   if (exists!.n > 0) {
@@ -30,6 +31,7 @@ export async function seedDev() {
     const a1 = await user('aziza', 'Aziza Karimova', 'ACCOUNTANT');
     const a2 = await user('bobur', 'Bobur Toshmatov', 'ACCOUNTANT');
     const a3 = await user('gulnora', 'Gulnora Yusupova', 'ACCOUNTANT');
+    await user('operator', 'Nodira Operator', 'OPERATOR');
 
     const clients = [
       { stir: '305123456', name: 'SHERPROM STROY MChJ', taxType: 'AOS', accountantId: a1, status: 'ACTIVE' },
@@ -60,14 +62,5 @@ export async function seedDev() {
     }
   });
   await runGenerator(currentPeriod(), false, null);
-  console.log('Dev seed tayyor. Loginlar: rahbar / aziza / bobur / gulnora, parol: Parol123!');
-}
-
-if (require.main === module) {
-  seedDev()
-    .then(() => pool.end())
-    .catch((e) => {
-      console.error(e);
-      process.exit(1);
-    });
+  console.log('E2E seed tayyor. Loginlar: rahbar / aziza / bobur / gulnora');
 }

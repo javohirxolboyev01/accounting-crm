@@ -33,10 +33,6 @@ export const config = {
     token: process.env.TELEGRAM_BOT_TOKEN ?? '',
     username: process.env.TELEGRAM_BOT_USERNAME ?? '',
   },
-  google: {
-    serviceAccountFile: process.env.GOOGLE_SERVICE_ACCOUNT_FILE ?? '',
-    sheetId: process.env.GOOGLE_SHEET_ID ?? '',
-  },
   schedulerEnabled: bool(process.env.SCHEDULER_ENABLED, env !== 'test'),
   backup: {
     enabled: bool(process.env.BACKUP_ENABLED, false),

@@ -16,12 +16,16 @@ export async function loadGrid(
   f: { accountantId?: number; taxType?: string; status?: string; search?: string; clientIds?: number[] },
 ) {
   const dueTime = await getDueTime(db);
+  // Barcha faol hisobotlar har oy ustun (V11); choraklik/yillik muddati o'z generatsiya davridan
   const columns = await q(
     db,
-    `SELECT id AS "reportTypeId", code, name, name_ru AS "nameRu", due_day AS "dueDay",
-            creates_accountant_task AS "createsAccountantTask",
-            to_char(fn_due_at($1, due_day, $2) AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM-DD') AS "dueDate"
-     FROM fn_report_columns($1)`,
+    `SELECT rt.id AS "reportTypeId", rt.code, rt.name, rt.name_ru AS "nameRu", rt.due_day AS "dueDay",
+            rt.creates_accountant_task AS "createsAccountantTask",
+            to_char(fn_due_at(g.source_period, rt.due_day, $2) AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM-DD') AS "dueDate"
+     FROM fn_grid_columns($1) g
+     JOIN report_type rt ON rt.id = g.report_type_id
+     WHERE g.source_period IS NOT NULL
+     ORDER BY rt.sort_order, rt.id`,
     [period, dueTime],
   );
   const where: string[] = [];

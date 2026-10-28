@@ -22,6 +22,10 @@ export function renderNotification(kind: string, p: any, lang: Lang): string {
       return uz
         ? `🚨 Shoshilinch vazifa: ${p.title}\nMijoz: ${p.clientName}\nMuddat: ${fmt(p.dueAt)}\nKim berdi: ${p.createdByName}`
         : `🚨 Срочная задача: ${p.title}\nКлиент: ${p.clientName}\nСрок: ${fmt(p.dueAt)}\nПоставил: ${p.createdByName}`;
+    case 'LEAD_WON':
+      return uz
+        ? `🤝 Yangi mijoz topildi: ${p.leadName}\nSTIR: ${p.stir}\nOperator: ${p.actorName}${p.comment ? `\nIzoh: ${p.comment}` : ''}\nBuxgalter biriktiring.`
+        : `🤝 Найден новый клиент: ${p.leadName}\nИНН: ${p.stir}\nОператор: ${p.actorName}${p.comment ? `\nКомментарий: ${p.comment}` : ''}\nНазначьте бухгалтера.`;
     default:
       return uz ? `Bildirishnoma: ${kind}` : `Уведомление: ${kind}`;
   }

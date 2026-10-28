@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { NewClientDialog } from '@/components/NewClientDialog';
 import { NoteCell } from '@/components/NoteCell';
+import { SheetImportActions } from '@/components/SheetImport';
 import { TaxBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card, PageHeader } from '@/components/ui/card';
@@ -126,7 +127,12 @@ export default function Clients() {
     <div className="page-fill">
       <PageHeader
         title={t('works.title')}
-        actions={isLeader && <Button onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" /> {t('clients.new')}</Button>}
+        actions={isLeader && (
+          <>
+            <SheetImportActions kind="WORKS" />
+            <Button onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" /> {t('clients.new')}</Button>
+          </>
+        )}
       />
       <Card className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b p-3">

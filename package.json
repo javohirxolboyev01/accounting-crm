@@ -10,8 +10,7 @@
     "build": "npm run build -w apps/api && npm run build -w apps/web",
     "start": "npm run start -w apps/api",
     "test": "npm test -w apps/api",
-    "db:migrate": "npm run migrate -w apps/api",
-    "db:seed": "npm run seed:dev -w apps/api"
+    "db:migrate": "npm run migrate -w apps/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

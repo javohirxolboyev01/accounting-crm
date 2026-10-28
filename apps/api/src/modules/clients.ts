@@ -5,7 +5,7 @@ import { audit, diff } from '../common/audit';
 import { AppError, forbidden, notFound, parse } from '../common/errors';
 import { normalizeName, normalizeStir } from '../common/normalize';
 import { decryptSecret, encryptSecret } from '../common/secretBox';
-import { currentPeriod } from '../common/time';
+import { currentPeriod, monthOf } from '../common/time';
 import { type Db, one, pool, q, tx } from '../db';
 import { reassignOpenTasks, reconcileClient } from './generator';
 
@@ -68,7 +68,7 @@ const stirSchema = z
   .transform(normalizeStir)
   .refine((s) => /^(\d{9}|\d{14})$/.test(s), 'STIR 9 (yoki JShShIR 14) raqamdan iborat bo\'lishi kerak');
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Sana YYYY-MM-DD');
-const quarterSchema = z.string().regex(/^\d{4}-Q[1-4]$/, 'Chorak formati: 2026-Q3');
+const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Oy formati: 2026-10');
 
 export const clientInput = z.object({
   stir: stirSchema,
@@ -185,10 +185,19 @@ clientsRouter.get('/:id', async (req, res) => {
      WHERE h.client_id = $1 ORDER BY h.effective_from DESC`,
     [id],
   );
-  const dividendQuarters = (
-    await q<{ quarter: string }>(pool, 'SELECT quarter FROM client_dividend_quarter WHERE client_id = $1 ORDER BY quarter DESC', [id])
-  ).map((r) => r.quarter);
-  res.json({ ...c, taxHistory, dividendQuarters });
+  const dividendMonths = (
+    await q<{ month: string }>(pool, 'SELECT month FROM client_dividend_month WHERE client_id = $1 ORDER BY month DESC', [id])
+  ).map((r) => r.month);
+  // Fayldagi "X": mijoz soliq turidan qat'i nazar topshirmaydigan hisobotlar (V17)
+  const reportExclusions = await q(
+    pool,
+    `SELECT e.report_type_id AS "reportTypeId", rt.code, rt.name, rt.name_ru AS "nameRu",
+            to_char(e.effective_from, 'YYYY-MM') AS "effectiveFrom"
+     FROM client_report_exclusion e JOIN report_type rt ON rt.id = e.report_type_id
+     WHERE e.client_id = $1 ORDER BY rt.sort_order, rt.id`,
+    [id],
+  );
+  res.json({ ...c, taxHistory, dividendMonths, reportExclusions });
 });
 
 clientsRouter.get('/:id/history', async (req, res) => {
@@ -330,34 +339,67 @@ clientsRouter.post('/:id/mehnat-password/reveal', async (req, res) => {
 });
 
 // ---------- Dividend belgisi ----------
-// TODO(tasdiqlash): belgini rahbar yoki mijozning buxgalteri qo'yadi deb olindi
-clientsRouter.put('/:id/dividend/:quarter', async (req, res) => {
+// Dividend to'langan oyda hisobot shu oyda chiqadi (V12). Faqat joriy oy belgilanadi: o'tgan oy uchun
+// reconcile butun davrni (doimiy ishlar bilan) qayta yaratib yuborishi mumkin.
+// TODO(tasdiqlash): belgini rahbar yoki mijozning buxgalteri qo'yadi; o'tgan oyni belgilash kerakmi
+function dividendMonth(raw: string) {
+  const month = parse(monthSchema, raw);
+  if (month !== monthOf(currentPeriod())) {
+    throw new AppError(400, 'DIVIDEND_CURRENT_MONTH', 'Dividend belgisini faqat joriy oy uchun qo\'yish mumkin');
+  }
+  return month;
+}
+
+clientsRouter.put('/:id/dividend/:month', async (req, res) => {
   const u = me(req);
   const id = parse(z.coerce.number().int(), req.params.id);
-  const quarter = parse(quarterSchema, req.params.quarter);
+  const month = dividendMonth(req.params.month);
   await tx(async (db) => {
     await loadClientForUser(db, id, u, true);
     const r = await db.query(
-      `INSERT INTO client_dividend_quarter (client_id, quarter, marked_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-      [id, quarter, u.id],
+      `INSERT INTO client_dividend_month (client_id, month, marked_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [id, month, u.id],
     );
     if (r.rowCount) {
-      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'DIVIDEND_MARK', after: { quarter } });
+      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'DIVIDEND_MARK', after: { month } });
       await reconcileClient(db, id, u.id);
     }
   });
   res.json({ ok: true });
 });
 
-clientsRouter.delete('/:id/dividend/:quarter', async (req, res) => {
+clientsRouter.delete('/:id/dividend/:month', async (req, res) => {
   const u = me(req);
   const id = parse(z.coerce.number().int(), req.params.id);
-  const quarter = parse(quarterSchema, req.params.quarter);
+  const month = dividendMonth(req.params.month);
   await tx(async (db) => {
     await loadClientForUser(db, id, u, true);
-    const r = await db.query('DELETE FROM client_dividend_quarter WHERE client_id = $1 AND quarter = $2', [id, quarter]);
+    const r = await db.query('DELETE FROM client_dividend_month WHERE client_id = $1 AND month = $2', [id, month]);
     if (r.rowCount) {
-      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'DIVIDEND_UNMARK', before: { quarter } });
+      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'DIVIDEND_UNMARK', before: { month } });
+      await reconcileClient(db, id, u.id);
+    }
+  });
+  res.json({ ok: true });
+});
+
+// ---------- Topshirilmaydigan hisobot belgisi ("X", V17) ----------
+// Belgi fayl importidan keladi; rahbar olib tashlasa joriy oydan hisobot yana soliq turi bo'yicha chiqadi.
+clientsRouter.delete('/:id/report-exclusions/:reportTypeId', async (req, res) => {
+  const u = me(req);
+  if (!isLeader(u)) throw forbidden();
+  const id = parse(z.coerce.number().int(), req.params.id);
+  const reportTypeId = parse(z.coerce.number().int(), req.params.reportTypeId);
+  await tx(async (db) => {
+    await loadClientForUser(db, id, u, true);
+    const r = await one<{ code: string }>(
+      db,
+      `DELETE FROM client_report_exclusion e USING report_type rt
+       WHERE e.client_id = $1 AND e.report_type_id = $2 AND rt.id = e.report_type_id RETURNING rt.code`,
+      [id, reportTypeId],
+    );
+    if (r) {
+      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'REPORT_INCLUDE', before: { report: r.code } });
       await reconcileClient(db, id, u.id);
     }
   });

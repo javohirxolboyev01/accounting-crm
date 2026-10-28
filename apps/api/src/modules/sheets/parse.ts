@@ -149,3 +149,103 @@ export function parseNote(raw: unknown): ParsedNote {
   if (original && !res.status && !res.effectiveFrom && !res.review) res.note = text;
   return res;
 }
+
+// ---------- "Бухгалтер ишлари" fayli ----------
+// Ikki qatorli sarlavha: yuqorisi guruh ("my.mehnat.uz", "Счёт-фактура"), pastkisi ustun ("логин", "кирим").
+// Birlashtirilgan kataklar ikkala qatorda bir xil matn bo'ladi (xlsxToRows asosiy katak qiymatini beradi).
+
+export interface RoutineTypeLite {
+  id: number;
+  name: string;
+  reportTypeId: number | null;
+  sheetAliases: string[];
+}
+
+export type WorkField =
+  | 'stir' | 'name' | 'taxType' | 'monthlyFee' | 'accountant' | 'bankKey'
+  | 'employeeCount' | 'mehnatCheckedAt' | 'mehnatLogin' | 'mehnatPassword' | 'note';
+
+export interface WorkColumnMap {
+  /** Ma'lumot shu qatordan keyin boshlanadi */
+  headerRow: number;
+  fields: Partial<Record<WorkField, number>>;
+  routines: { col: number; routineTypeId: number; name: string; header: string }[];
+}
+
+function classifyWork(top: string, sub: string): WorkField | 'skip' | null {
+  const t = headerKey(top);
+  const s = headerKey(sub);
+  const k = s || t;
+  if (!k) return null;
+  if (k === 'STIR' || k === 'INN' || k.startsWith('STIR') || k.startsWith('INN')) return 'stir';
+  if (has(k, 'KORXONANOMI', 'NOMI', 'NAZVANIE', 'NAIMENOVANIE')) return 'name';
+  if (has(k, 'SOLIQTURI', 'VIDNALOG', 'TIPNALOG')) return 'taxType';
+  // "30% (Бухгалтерлар улуши)" hisoblanadi, saqlanmaydi (V9)
+  if (has(k, 'ULUSH', 'DOLYA') || top.includes('%')) return 'skip';
+  if (has(k, 'OYLIKTULOV', 'OYLIKTOLOV', 'ABONENT')) return 'monthlyFee';
+  if (has(k, 'JAVOBGAR', 'OTVETSTV')) return 'accountant';
+  if (has(k, 'BANKKLYUCH', 'BANKKALIT', 'BANKKEY', 'KLYUCH')) return 'bankKey';
+  if (has(t, 'MEHNAT')) {
+    if (has(s, 'XODIMSONI', 'HODIMSONI', 'SONI')) return 'employeeCount';
+    if (has(s, 'SANA', 'DATA')) return 'mehnatCheckedAt';
+    if (has(s, 'LOGIN')) return 'mehnatLogin';
+    if (has(s, 'PAROL')) return 'mehnatPassword';
+    return 'skip';
+  }
+  if (has(k, 'IZOH', 'PRIMECHAN')) return 'note';
+  return null;
+}
+
+function matchRoutine(top: string, sub: string, types: RoutineTypeLite[]) {
+  for (const k of [headerKey(sub), headerKey(top)]) {
+    if (!k) continue;
+    for (const t of types) if (t.sheetAliases.some((a) => k.includes(headerKey(a)))) return t;
+  }
+  return null;
+}
+
+/** Kamida 3 ta doimiy ish ustuni topilsa "Бухгалтер ишлари" fayli; aks holda null (hisobot fayli deb olinadi) */
+export function detectWorkColumns(rows: unknown[][], types: RoutineTypeLite[]): WorkColumnMap | null {
+  for (let r = 0; r < Math.min(rows.length, 20); r++) {
+    const top = rows[r] ?? [];
+    const next = rows[r + 1] ?? [];
+    // Pastki sarlavha qatori: STIR ustunida ham sarlavha matni turadi (raqam emas)
+    const width = Math.max(top.length, next.length);
+    const map: WorkColumnMap = { headerRow: r, fields: {}, routines: [] };
+    const subRow = (() => {
+      for (let c = 0; c < width; c++) if (classifyWork(cellText(top[c]), '') === 'stir') return headerKey(cellText(next[c])).startsWith('STIR') || headerKey(cellText(next[c])).startsWith('INN');
+      return false;
+    })();
+    for (let c = 0; c < width; c++) {
+      const t = cellText(top[c]).trim();
+      const s = subRow ? cellText(next[c]).trim() : '';
+      const f = classifyWork(t, s === t ? '' : s);
+      if (f === 'skip') continue;
+      if (f) {
+        if (map.fields[f] === undefined) map.fields[f] = c;
+        continue;
+      }
+      const rt = matchRoutine(t, s, types);
+      if (rt && !map.routines.some((x) => x.routineTypeId === rt.id)) {
+        map.routines.push({ col: c, routineTypeId: rt.id, name: rt.name, header: s && s !== t ? `${t} / ${s}` : t });
+      }
+    }
+    if (map.fields.stir !== undefined && map.routines.length >= 3) {
+      if (subRow) map.headerRow = r + 1;
+      return map;
+    }
+  }
+  return null;
+}
+
+/** 'YYYY-MM-DD' | 'dd.mm.yyyy' | 'dd/mm/yyyy' -> 'YYYY-MM-DD'; tanib bo'lmasa null */
+export function parseDate(raw: unknown): string | null {
+  const s = cellText(raw).trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  let y: number, mo: number, d: number;
+  if (m) [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  else if ((m = /^(\d{1,2})[./](\d{1,2})[./](\d{4})$/.exec(s))) [d, mo, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  else return null;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}

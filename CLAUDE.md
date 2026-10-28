@@ -9,7 +9,7 @@ Bu fayl loyiha ildizida `CLAUDE.md` nomi bilan turadi. Har bosqichda shu konteks
 - Vazifalar (oylik doimiy ishlar + hisobotlar) har oy o'zi yaratiladi.
 - Buxgalter "Bajarildi" bosadi, rahbarga bildirishnoma boradi.
 - Rahbar kim nima qilayotganini, nima kechikayotganini bir qarashda ko'radi.
-- Hozirgi Google Sheet bilan doimiy ikki tomonlama sinxron.
+- Ma'lumot Excel (.xlsx) importi bilan keladi: har sahifa o'z faylini yuklaydi. Google Sheets sinxron **yo'q** (rahbar qarori, ishlatilmaydi).
 - Interfeys tillari: o'zbek (lotin) va rus.
 - Barcha sana/vaqt mantiqi: `Asia/Tashkent`.
 
@@ -22,7 +22,7 @@ Bu fayl loyiha ildizida `CLAUDE.md` nomi bilan turadi. Har bosqichda shu konteks
 - Backend: Node.js 20+ / Express 5 / TypeScript, PostgreSQL 16, `pg` (toza SQL), Flyway uslubidagi SQL migratsiyalar (`apps/api/migrations/V<n>__<nom>.sql`, checksum bilan), JWT (access + aylanuvchi refresh cookie), zod validatsiya, `node-cron` rejalashtirish.
 - ORM ishlatilmaydi: partial unique index, trigger, view va SQL funksiyalar (X qoidasi) to'g'ridan-to'g'ri SQL'da.
 - Bildirishnoma: Telegram bot (faqat xodimlarga, long polling) + ilova ichidagi bildirishnoma (SSE).
-- Sheets: Google Sheets API (service account), import uchun `.xlsx` (exceljs).
+- Import: `.xlsx` (exceljs). Google Sheets API ishlatilmaydi.
 - Testlar: vitest + supertest (haqiqiy PostgreSQL test bazasi), Playwright smoke (alohida e2e bazasi).
 
 ## 3. Ishlash qoidalari (Claude uchun)
@@ -39,11 +39,13 @@ Bu fayl loyiha ildizida `CLAUDE.md` nomi bilan turadi. Har bosqichda shu konteks
 
 - **Rahbar (3):** hamma mijoz, hamma vazifa, dashboard, sozlamalar, buxgalter tayinlash, shoshilinch vazifa.
 - **Buxgalter (7):** faqat o'ziga biriktirilgan mijozlar va ularning vazifalari.
+- **Sotuv operatori (1):** faqat "Yangi mijozlar" (`lead`) bo'limi. Mavjud mijozlar bilan gaplashmaydi, buxgalteriya API'lari unga yopiq (`requireStaff`).
 - Ruxsat tekshiruvi **serverda** (frontend yashirishi yetarli emas).
 
 ## 5. Ma'lumotlar modeli (asos)
 
-- `user` (role: LEADER | ACCOUNTANT, til, telegram_chat_id)
+- `user` (role: LEADER | ACCOUNTANT | OPERATOR, til, telegram_chat_id)
+- `lead` (operator bazasi, `client`dan alohida): stir (unique), name, director, phone, address, registered_at, status (NEW | NO_ANSWER | CALL_LATER | MEETING | HAS_ACCOUNTANT | REJECTED | WON | CONVERTED), next_call_date, converted_client_id; `lead_call`: har qo'ng'iroq natijasi + izoh. Rahbar Excel yuklaydi (STIR bo'yicha takror va mavjud mijozlar o'tkaziladi). HAS_ACCOUNTANT/REJECTED — yopiladi. WON — rahbarga bildirishnoma (`LEAD_WON`), operatorga ko'rinmaydi. Rahbar mijozga aylantiradi (CONVERTED). Qayta qo'ng'iroq eslatmasi faqat ilovada ("Bugun qo'ng'iroq" ro'yxati).
 - `client`: stir (unique), name, name_normalized, contact_person, phone, tax_type (AOS | QQS), tax_type_effective_from, accountant_id, status (ACTIVE | ZERO_REPORT | LIQUIDATING), note
 - `client_tax_type_history`: client_id, tax_type, effective_from (rejim o'zgarsa hisobotlar shu sanadan almashadi)
 - `report_type`: code, name, frequency (MONTHLY | QUARTERLY | YEARLY), due_day, applies_to (AOS/QQS), active, creates_accountant_task (INPS = true, qolganlari = false, `TODO(tasdiqlash)`), generation_months (chorak: 1,4,7,10; yillik: 2)
@@ -87,11 +89,11 @@ Mas'ul shaxs telefoni faqat aloqa ma'lumoti (mijozga avtomatik xabar **yuborilma
 | QQS | oylik | 20-sana | yo'q | ha |
 | INPS | oylik | hisobot oyidan keyingi oyning 15-kuni | ha | ha |
 | Poruchenya JShDS (to'lov topshiriqnomasi) | oylik, hamma mijoz | `TODO(tasdiqlash)`: muddat kuni | ha | ha |
-| Foyda solig'i | choraklik (yan/apr/iyul/okt) | 20-sana | yo'q | ha |
-| Dividend hisoboti | choraklik, faqat dividend to'langan chorakda | hisobot oyidan keyingi oyning 20-kuni | ha | ha |
-| Moliyaviy natijalar | yillik | keyingi yilning 15-fevrali | ha | ha |
-| Buxgalteriya balansi | yillik | keyingi yilning 15-fevrali | ha | ha |
-| Statistika hisoboti | yillik | keyingi yilning 15-fevrali | ha | ha |
+| Foyda solig'i | oylik | 20-sana | yo'q | ha |
+| Dividend hisoboti | oylik, faqat dividend to'langan oyda | shu oyning 20-kuni (sozlamadan) | ha | ha |
+| Moliyaviy natijalar | oylik | 15-sana | ha | ha |
+| Buxgalteriya balansi | oylik | 15-sana | ha | ha |
+| Statistika hisoboti | oylik | 15-sana | ha | ha |
 
 #### Asosiy qoida: soliq turi va "X"
 
@@ -110,10 +112,11 @@ Korxonalar 2 sinfga bo'linadi: **QQS to'lovchi** va **AOS to'lovchi**. QQS to'lo
 - Haqiqiy jadvaldan misol: SHERPROM STROY (AOS) — QQS va Foyda `X`; INSAR MIX TRADE (QQS) — AOS `X`.
 - Tur o'zgarsa (`tax_type_effective_from`): shu sanadan boshlab hisobotlar ro'yxati almashadi. Joriy davrda endi qo'llanmaydigan **ochiq** vazifalar bekor qilinadi (o'chirilmaydi, `audit_log`'da qoladi), yangi qo'llanadiganlari yaratiladi, **bajarilganlari** o'zgarmaydi.
 - Qoida kodda qotirilmagan: `report_type.applies_to` ma'lumotidan o'qiladi (6.3 jadvali seed).
+- Mijozga xos istisno: import faylida soliq turi bo'yicha topshiriladigan katakda `X` bo'lsa, `client_report_exclusion` (shu oydan doimiy) — vazifa yaratilmaydi, jadvalda X. Faylda 0/1 kelsa yoki rahbar mijoz kartasidan olib tashlasa, belgi o'chadi.
 
 - Generatsiya har oyning 1-kuni; muddat shu oy ichida (Oktyabrda INPS = 15.10, dividend = 20.10).
 - Muddat kunlari va "qaysi soliq turiga qaysi hisobot" qoidasi **ma'lumot sifatida** (`report_type`), kodga qotirilmaydi. Qonun o'zgarsa rahbar sozlamadan tuzatadi.
-- Dividend: mijoz kartasida "shu chorakda dividend to'langan" belgisi bo'lsa vazifa chiqadi (`TODO(tasdiqlash)`: kim belgilaydi — taxmin: buxgalter yoki rahbar).
+- Dividend: mijoz kartasida "shu oyda dividend to'langan" belgisi bo'lsa vazifa shu oyda chiqadi (faqat joriy oy belgilanadi) (`TODO(tasdiqlash)`: kim belgilaydi — taxmin: buxgalter yoki rahbar).
 - Soliq turi o'zgarsa (`effective_from`), hisobotlar ro'yxati shu sanadan almashadi; o'tgan davrlar o'zgarmaydi.
 
 ### 6.4 Vazifa holatlari
@@ -163,7 +166,7 @@ Katakchani bosish vazifani "Bajarildi" qiladi.
 - Buxgalterlar bo'yicha: bajargan (kun/hafta/oy), o'z vaqtida foiz, kechikkan, ochiq vazifa (yuklama), ishga sarflangan vaqt.
 - "O'z vaqtida" = `done_at <= due_at`.
 
-## 7. Google Sheets bilan ma'lumot almashish
+## 7. Excel import (jadval fayllari)
 
 Haqiqiy jadval ustunlari:
 `№ | STIR | Korxona nomi | Soliq turi | JSHDS dd.mm.yyyy | To'lov manbai dd.mm.yyyy | AOS dd.mm.yyyy | QQS dd.mm.yyyy | FOYDA dd.mm.yyyy | INPS | Poruchenya JSHDS | Қилиниши лозим бўлган ишлар`
@@ -172,7 +175,8 @@ Haqiqiy jadval ustunlari:
 - Migratsiyada izoh uch joyga bo'linadi: `status` (Tugatishga bergan → LIQUIDATING), `tax_type_effective_from` (01.01.2026), `note`. Avtomatik ajratib bo'lmaganlar **qo'lda tekshirish hisobotiga** tushadi, jim taxmin qilinmaydi.
 - Kirill/lotin aralashmasi: `AOC`/`AOS`, `ҚҚС`/`QQS` → `tax_type` enumga normallashtiriladi; `name_normalized` (kirill→lotin, kichik harf, MChJ/МЧЖ bir xil) qidiruv uchun.
 - Sarlavhadagi sanalar har oyda o'zgaradi (yangi ustun/varaq); ustunni sarlavha matnidan aniqlang, indeksdan emas.
-- Sinxron: avval bir martalik import (dry-run + hisobot), keyin davriy ikki tomonlama. Ziddiyatda `updated_at` bo'yicha oxirgisi yutadi, ikkala qiymat `audit_log`'ga yoziladi.
+- Import fayl turini sarlavhadan o'zi aniqlaydi: kamida 3 ta doimiy ish ustuni (`routine_work_type.sheet_aliases`) bo'lsa "Бухгалтер ишлари" fayli → Buxgalter ishlari sahifasi (mijoz maydonlari, buxgalter, my.mehnat.uz, har ish uchun "qaysi oygacha bajarilgan"); aks holda hisobot jadvali → Hisobot topshirish sahifasi.
+- Har sahifada "Excel yuklash" (faqat rahbar): avval dry-run + hisobot, keyin yuklash. Buxgalter ishlari sahifasi faqat «Бухгалтер ишлари» faylini, Hisobot topshirish faqat hisobot jadvalini qabul qiladi (`kind`, mos kelmasa `WRONG_FILE_KIND`). Bir xil fayl (SHA-256) qayta yozilmaydi. Davriy sinxron yo'q.
 
 ## 8. Tizimda yo'q (qilmang)
 

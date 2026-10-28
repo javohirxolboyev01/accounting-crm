@@ -16,7 +16,7 @@ export async function resetDb() {
 
 export const PASSWORD = 'Parol123!';
 
-export async function createUser(login: string, role: 'LEADER' | 'ACCOUNTANT', fullName = login) {
+export async function createUser(login: string, role: 'LEADER' | 'ACCOUNTANT' | 'OPERATOR', fullName = login) {
   const u = await one(
     pool,
     `INSERT INTO app_user (login, full_name, role, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`,

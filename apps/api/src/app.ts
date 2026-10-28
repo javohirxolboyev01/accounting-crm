@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
+import { requireAuth, requireStaff } from './common/auth';
 import { errorHandler } from './common/errors';
 import { config } from './config';
 import { pool } from './db';
@@ -13,6 +14,7 @@ import { auditRouter, dashboardRouter } from './modules/dashboard';
 import { sseHandler } from './modules/events';
 import { generatorRouter } from './modules/generator';
 import { gridRouter } from './modules/grid';
+import { leadsRouter } from './modules/leads';
 import { notificationsRouter } from './modules/notifications';
 import { settingsRouter } from './modules/settings';
 import { sheetsRouter } from './modules/sheets/routes';
@@ -39,19 +41,22 @@ export function createApp() {
     res.json({ status: 'UP', db: 'UP', timezone: r.rows[0].tz, time: new Date().toISOString() });
   });
 
+  // Buxgalteriya bo'limlari operatorga yopiq: u faqat /api/leads bilan ishlaydi (serverda, frontend yashirishiga tayanmay)
+  const staff = [requireAuth, requireStaff];
   app.use('/api/auth', authRouter);
   app.use('/api/me', meRouter);
-  app.use('/api/users', usersRouter);
-  app.use('/api/clients', clientsRouter);
-  app.use('/api/settings', settingsRouter);
-  app.use('/api/tasks', tasksRouter);
-  app.use('/api/generator', generatorRouter);
-  app.use('/api/monthly-grid', gridRouter);
-  app.use('/api/works', worksRouter);
+  app.use('/api/users', staff, usersRouter);
+  app.use('/api/clients', staff, clientsRouter);
+  app.use('/api/settings', staff, settingsRouter);
+  app.use('/api/tasks', staff, tasksRouter);
+  app.use('/api/generator', staff, generatorRouter);
+  app.use('/api/monthly-grid', staff, gridRouter);
+  app.use('/api/works', staff, worksRouter);
   app.use('/api/notifications', notificationsRouter);
-  app.use('/api/dashboard', dashboardRouter);
-  app.use('/api/audit', auditRouter);
-  app.use('/api/sheets', sheetsRouter);
+  app.use('/api/dashboard', staff, dashboardRouter);
+  app.use('/api/audit', staff, auditRouter);
+  app.use('/api/sheets', staff, sheetsRouter);
+  app.use('/api/leads', leadsRouter);
   app.get('/api/events', sseHandler);
 
   app.use('/api', (_req, res) => {

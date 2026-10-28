@@ -5,7 +5,6 @@ import { config } from './config';
 import { currentPeriod } from './common/time';
 import { runGenerator } from './modules/generator';
 import { dispatchDue, remindOverdue } from './modules/notifications';
-import { syncAllEnabled } from './modules/sheets/routes';
 
 const tz = { timezone: config.timezone };
 const intervals: NodeJS.Timeout[] = [];
@@ -27,8 +26,6 @@ export function startScheduler() {
   intervals.push(setInterval(safe('dispatcher', () => dispatchDue()), 1000));
   // Muddat o'tdi eslatmasi: har daqiqa
   intervals.push(setInterval(safe('overdue', remindOverdue), 60_000));
-  // Google Sheets davriy sinxron: 5 daqiqa
-  cron.schedule('*/5 * * * *', safe('sheets', syncAllEnabled), tz);
 
   if (config.backup.enabled) {
     // Kunlik zaxira 02:30

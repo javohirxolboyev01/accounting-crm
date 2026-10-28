@@ -7,7 +7,6 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "migrate": "tsx src/migrate.ts",
-    "seed:dev": "tsx src/seed-dev.ts",
     "test": "NODE_ENV=test vitest run",
     "typecheck": "tsc --noEmit",
     "e2e:server": "tsx tests/e2e-server.ts"
@@ -20,7 +19,6 @@
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
-    "googleapis": "^144.0.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "luxon": "^3.5.0",

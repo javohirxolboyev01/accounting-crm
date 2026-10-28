@@ -1,11 +1,11 @@
 // API javob tiplari (backend DTO'lariga mos)
-export type Role = 'LEADER' | 'ACCOUNTANT';
+export type Role = 'LEADER' | 'ACCOUNTANT' | 'OPERATOR';
 export type Lang = 'uz' | 'ru';
 export type TaxType = 'AOS' | 'QQS';
 export type ClientStatus = 'ACTIVE' | 'ZERO_REPORT' | 'LIQUIDATING';
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'WAITING_CLIENT' | 'DONE' | 'CANCELLED';
 export type TaskKind = 'ROUTINE' | 'REPORT' | 'URGENT' | 'MANUAL';
-export type NotificationKind = 'TASK_DONE' | 'TASK_OVERDUE' | 'URGENT_TASK';
+export type NotificationKind = 'TASK_DONE' | 'TASK_OVERDUE' | 'URGENT_TASK' | 'LEAD_WON';
 
 export interface Me {
   id: number;
@@ -18,6 +18,8 @@ export interface Me {
   notificationPrefs: Partial<Record<NotificationKind, { app?: boolean; telegram?: boolean }>>;
   telegramBotEnabled?: boolean;
   telegramBotUsername?: string | null;
+  /** Shu rolga keladigan bildirishnoma turlari (profil sozlamasi uchun) */
+  notificationKinds?: NotificationKind[];
 }
 
 export interface User {
@@ -66,7 +68,8 @@ export interface Client {
 
 export interface ClientCard extends Client {
   taxHistory: { id: number; taxType: TaxType; effectiveFrom: string; createdAt: string; createdByName: string | null }[];
-  dividendQuarters: string[];
+  dividendMonths: string[];
+  reportExclusions: { reportTypeId: number; code: string; name: string; nameRu: string; effectiveFrom: string }[];
 }
 
 export interface Paged<T> {
@@ -325,6 +328,7 @@ export interface DashboardAccountants {
 }
 
 export interface ImportReport {
+  kind: 'REPORTS' | 'WORKS';
   dryRun: boolean;
   period: string;
   columns: { header: string; code: string }[];
@@ -341,23 +345,6 @@ export interface PreviousImport {
   importedBy: string | null;
 }
 
-export interface SheetsStatus {
-  googleConfigured: boolean;
-  defaultSpreadsheetId: string | null;
-  intervalMinutes: number;
-  states: {
-    id: number;
-    spreadsheetId: string;
-    sheetTitle: string;
-    month: string;
-    enabled: boolean;
-    lastSyncedAt: string | null;
-    status: string;
-    details: any;
-  }[];
-  errors: { id: number; kind: string; stateId: number; occurredAt: string; ref: string; stir: string | null; message: string; rawValue: string | null }[];
-}
-
 export interface ReviewItem {
   id: number;
   occurredAt: string;
@@ -365,4 +352,54 @@ export interface ReviewItem {
   stir: string | null;
   message: string;
   clientId: number | null;
+}
+
+// ---------- Sotuv operatori: yangi firmalar (lead) ----------
+export type LeadStatus = 'NEW' | 'NO_ANSWER' | 'CALL_LATER' | 'MEETING' | 'HAS_ACCOUNTANT' | 'REJECTED' | 'WON' | 'CONVERTED';
+export type LeadResult = Exclude<LeadStatus, 'NEW' | 'CONVERTED'>;
+export type LeadView = 'today' | 'open' | 'closed' | 'won' | 'converted' | 'all';
+
+export interface Lead {
+  id: number;
+  stir: string;
+  name: string;
+  director: string | null;
+  phone: string | null;
+  address: string | null;
+  registeredAt: string | null;
+  status: LeadStatus;
+  nextCallDate: string | null;
+  lastCallAt: string | null;
+  transferredAt: string | null;
+  convertedClientId: number | null;
+  createdAt: string;
+  callCount: number;
+  lastComment: string | null;
+}
+
+export interface LeadCall {
+  id: number;
+  result: LeadResult;
+  comment: string | null;
+  nextCallDate: string | null;
+  createdAt: string;
+  userName: string;
+}
+
+export interface LeadCard extends Lead {
+  calls: LeadCall[];
+}
+
+export interface LeadStats {
+  calls: { day: number; week: number; month: number; dayFirms: number };
+  byResult: Partial<Record<LeadResult, number>>;
+  byStatus: Partial<Record<LeadStatus, number>>;
+  dueToday: number;
+}
+
+export interface LeadImportReport {
+  dryRun: boolean;
+  summary: { total: number; created: number; existingLead: number; existingClient: number; duplicateRow: number; invalid: number; withoutPhone: number };
+  rows: { row: number; stir: string; name: string; action: 'NEW' | 'EXISTING_LEAD' | 'EXISTING_CLIENT' | 'DUPLICATE_ROW' }[];
+  invalid: { row: number; stir: string; name: string; reason: 'BAD_STIR' | 'NO_NAME' }[];
 }

@@ -36,7 +36,7 @@ usersRouter.post('/', async (req, res) => {
       fullName: z.string().trim().min(2).max(200),
       login: z.string().trim().min(3).max(100).regex(/^[a-zA-Z0-9._-]+$/),
       password: passwordSchema,
-      role: z.enum(['LEADER', 'ACCOUNTANT']),
+      role: z.enum(['LEADER', 'ACCOUNTANT', 'OPERATOR']),
       language: z.enum(['uz', 'ru']).default('uz'),
     }),
     req.body,
@@ -60,13 +60,13 @@ usersRouter.patch('/:id', async (req, res) => {
   const body = parse(
     z.object({
       fullName: z.string().trim().min(2).max(200).optional(),
-      role: z.enum(['LEADER', 'ACCOUNTANT']).optional(),
+      role: z.enum(['LEADER', 'ACCOUNTANT', 'OPERATOR']).optional(),
       language: z.enum(['uz', 'ru']).optional(),
       active: z.boolean().optional(),
     }),
     req.body,
   );
-  if (id === actor.id && (body.active === false || body.role === 'ACCOUNTANT')) {
+  if (id === actor.id && (body.active === false || (body.role && body.role !== 'LEADER'))) {
     throw new AppError(400, 'SELF_LOCKOUT', 'O\'zingizni faolsizlantira yoki rolingizni pasaytira olmaysiz');
   }
   const user = await tx(async (db) => {

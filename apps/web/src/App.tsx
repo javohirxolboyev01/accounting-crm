@@ -15,7 +15,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Users = lazy(() => import('./pages/Users'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Audit = lazy(() => import('./pages/Audit'));
-const Sheets = lazy(() => import('./pages/Sheets'));
+const Leads = lazy(() => import('./pages/Leads'));
 
 /** UI darajasidagi himoya (qulaylik uchun). Haqiqiy ruxsat tekshiruvi serverda. */
 function Protected({ roles, children }: { roles?: Role[]; children: React.ReactNode }) {
@@ -23,16 +23,19 @@ function Protected({ roles, children }: { roles?: Role[]; children: React.ReactN
   const location = useLocation();
   if (loading) return <Loading className="h-screen animate-none" />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/my-day" replace />;
+  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
 function Home() {
   const { user } = useAuth();
-  return <Navigate to={user?.role === 'LEADER' ? '/dashboard' : '/my-day'} replace />;
+  const home = { LEADER: '/dashboard', ACCOUNTANT: '/my-day', OPERATOR: '/leads' } as const;
+  return <Navigate to={home[user?.role ?? 'ACCOUNTANT']} replace />;
 }
 
 const L: Role[] = ['LEADER'];
+/** Buxgalteriya bo'limlari: operator faqat "Yangi mijozlar" sahifasini ko'radi */
+const S: Role[] = ['LEADER', 'ACCOUNTANT'];
 
 /** Asosiy loader faqat loyiha ochilganda: auth tekshiruvi va birinchi sahifa kodi yuklanguncha */
 export default function App() {
@@ -43,15 +46,15 @@ export default function App() {
         <Route element={<Protected><Layout /></Protected>}>
           <Route index element={<Home />} />
           <Route path="dashboard" element={<Protected roles={L}><Dashboard /></Protected>} />
-          <Route path="my-day" element={<MyDay />} />
-          <Route path="clients" element={<Clients />} />
+          <Route path="my-day" element={<Protected roles={S}><MyDay /></Protected>} />
+          <Route path="clients" element={<Protected roles={S}><Clients /></Protected>} />
           <Route path="clients/new" element={<Navigate to="/clients" replace />} />
-          <Route path="clients/:id" element={<ClientCard />} />
-          <Route path="monthly" element={<Monthly />} />
+          <Route path="clients/:id" element={<Protected roles={S}><ClientCard /></Protected>} />
+          <Route path="monthly" element={<Protected roles={S}><Monthly /></Protected>} />
+          <Route path="leads" element={<Protected roles={['LEADER', 'OPERATOR']}><Leads /></Protected>} />
           <Route path="settings" element={<Protected roles={L}><Settings /></Protected>} />
           <Route path="users" element={<Protected roles={L}><Users /></Protected>} />
           <Route path="audit" element={<Protected roles={L}><Audit /></Protected>} />
-          <Route path="sheets" element={<Protected roles={L}><Sheets /></Protected>} />
           <Route path="profile" element={<Profile />} />
           <Route path="*" element={<Home />} />
         </Route>

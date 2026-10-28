@@ -7,13 +7,26 @@ import { me, requireAuth, requireLeader } from '../../common/auth';
 import { audit } from '../../common/audit';
 import { AppError, notFound, parse } from '../../common/errors';
 import { periodFromMonth } from '../../common/time';
-import { config } from '../../config';
-import { dryTx, one, pool, q, tx } from '../../db';
-import { googleAdapter, googleConfigured } from './google';
+import { type Db, dryTx, one, pool, q, tx } from '../../db';
 import { importTable } from './importer';
-import { syncState } from './sync';
+import { detectWorksFile, importWorks } from './worksImporter';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+/**
+ * Katak matni. exceljs `cell.text` bo'sh birlashtirilgan katakda yiqiladi va sanani Date.toString() qiladi:
+ * birlashtirilgan katak — asosiy katak qiymati, formula — natijasi, sana — 'YYYY-MM-DD'.
+ */
+function cellToText(cell: ExcelJS.Cell): string {
+  const v: any = cell.isMerged ? cell.master.value : cell.value;
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v !== 'object') return String(v);
+  if (Array.isArray(v.richText)) return v.richText.map((r: any) => r.text).join('');
+  if ('result' in v) return v.result instanceof Date ? v.result.toISOString().slice(0, 10) : String(v.result ?? '');
+  if ('text' in v) return String(v.text);
+  return '';
+}
 
 export async function xlsxToRows(buf: Buffer, sheetName?: string): Promise<unknown[][]> {
   const wb = new ExcelJS.Workbook();
@@ -24,28 +37,11 @@ export async function xlsxToRows(buf: Buffer, sheetName?: string): Promise<unkno
   ws.eachRow({ includeEmpty: true }, (row, n) => {
     const arr: unknown[] = [];
     row.eachCell({ includeEmpty: true }, (cell, col) => {
-      arr[col - 1] = cell.text;
+      arr[col - 1] = cellToText(cell);
     });
     rows[n - 1] = arr;
   });
   return Array.from(rows, (r) => r ?? []);
-}
-
-export async function syncAllEnabled() {
-  if (!googleConfigured()) return [];
-  const states = await q<{ id: number; spreadsheet_id: string; sheet_title: string }>(
-    pool,
-    'SELECT id, spreadsheet_id, sheet_title FROM sheet_sync_state WHERE enabled',
-  );
-  const out = [];
-  for (const s of states) {
-    try {
-      out.push(await syncState(s.id, await googleAdapter(s.spreadsheet_id, s.sheet_title)));
-    } catch (e) {
-      console.error(`Sheets sinxron xatosi (${s.sheet_title}):`, (e as Error).message);
-    }
-  }
-  return out;
 }
 
 export const sheetsRouter = Router();
@@ -58,7 +54,9 @@ interface PreviousImport {
 }
 
 /**
- * Import: xlsx fayl (multipart "file") yoki Google Sheet (JSON: spreadsheetId, sheetTitle). dryRun=true standart.
+ * Import: xlsx fayl (multipart "file"). dryRun=true standart.
+ * kind — fayl qaysi sahifadan yuklanmoqda: REPORTS (Hisobot topshirish) yoki WORKS (Buxgalter ishlari).
+ * Fayl turi sarlavhadan aniqlanadi; sahifaga mos kelmasa 400 WRONG_FILE_KIND (boshqa sahifaga yozib yubormaslik uchun).
  * Fayl mazmuni (SHA-256) avval import qilingan bo'lsa: dry-run javobida `alreadyImported`, haqiqiy importda 409
  * FILE_ALREADY_IMPORTED — bir xil faylni qayta yozish hech narsa qo'shmaydi, faqat chalg'itadi.
  */
@@ -67,102 +65,44 @@ sheetsRouter.post('/import', upload.single('file'), async (req, res) => {
   const f = parse(
     z.object({
       dryRun: z.enum(['true', 'false']).default('true'),
+      kind: z.enum(['REPORTS', 'WORKS']).optional(),
       month: z.string().optional(),
       sheet: z.string().optional(),
     }),
     req.query,
   );
   const dryRun = f.dryRun === 'true';
-  let rows: unknown[][];
-  let fileHash: string | null = null;
-  let previous: PreviousImport | undefined;
-  if (req.file) {
-    if (!/\.xlsx$/i.test(req.file.originalname)) throw new AppError(400, 'BAD_FILE', 'Faqat .xlsx fayl');
-    fileHash = createHash('sha256').update(req.file.buffer).digest('hex');
-    previous = await one<PreviousImport>(
-      pool,
-      `SELECT f.file_name AS "fileName", f.imported_at AS "importedAt", u.full_name AS "importedBy"
-       FROM sheet_import_file f LEFT JOIN app_user u ON u.id = f.imported_by WHERE f.file_hash = $1`,
-      [fileHash],
-    );
-    if (previous && !dryRun) throw new AppError(409, 'FILE_ALREADY_IMPORTED', 'Bu fayl allaqachon import qilingan', previous);
-    rows = await xlsxToRows(req.file.buffer, f.sheet);
-  } else {
-    const body = parse(z.object({ spreadsheetId: z.string().min(10), sheetTitle: z.string().min(1) }), req.body);
-    if (!googleConfigured()) throw new AppError(400, 'GOOGLE_NOT_CONFIGURED', 'Google service account sozlanmagan');
-    rows = (await (await googleAdapter(body.spreadsheetId, body.sheetTitle)).read()).values;
+  if (!req.file) throw new AppError(400, 'BAD_FILE', 'Fayl tanlanmagan');
+  if (!/\.xlsx$/i.test(req.file.originalname)) throw new AppError(400, 'BAD_FILE', 'Faqat .xlsx fayl');
+  const fileHash = createHash('sha256').update(req.file.buffer).digest('hex');
+  const previous = await one<PreviousImport>(
+    pool,
+    `SELECT f.file_name AS "fileName", f.imported_at AS "importedAt", u.full_name AS "importedBy"
+     FROM sheet_import_file f LEFT JOIN app_user u ON u.id = f.imported_by WHERE f.file_hash = $1`,
+    [fileHash],
+  );
+  if (previous && !dryRun) throw new AppError(409, 'FILE_ALREADY_IMPORTED', 'Bu fayl allaqachon import qilingan', previous);
+  const rows = await xlsxToRows(req.file.buffer, f.sheet);
+  // Fayl turi sarlavhadan: "Бухгалтер ишлари" (doimiy ish ustunlari) -> Buxgalter ishlari, aks holda hisobot jadvali
+  const works = await detectWorksFile(pool, rows);
+  const detected = works ? 'WORKS' : 'REPORTS';
+  if (f.kind && f.kind !== detected) {
+    throw new AppError(400, 'WRONG_FILE_KIND', 'Fayl bu sahifaga tegishli emas', { detected, expected: f.kind });
   }
   const opts = { period: f.month ? periodFromMonth(f.month) : undefined, actorId: u.id, dryRun };
+  const run = (db: Db) => (works ? importWorks(db, rows, works, opts) : importTable(db, rows, opts));
   const report = dryRun
-    ? await dryTx((db) => importTable(db, rows, opts))
+    ? await dryTx(run)
     : await tx(async (db) => {
-        const r = await importTable(db, rows, opts);
-        if (fileHash) {
-          await db.query(
-            `INSERT INTO sheet_import_file (file_hash, file_name, period, imported_by, summary) VALUES ($1, $2, $3, $4, $5)`,
-            // multer nomni latin1 deb o'qiydi: kirill/o'zbekcha nomlar buzilmasin
-            [fileHash, Buffer.from(req.file!.originalname, 'latin1').toString('utf8'), `${r.period}-01`, u.id, r.summary],
-          );
-        }
+        const r = await run(db);
+        await db.query(
+          `INSERT INTO sheet_import_file (file_hash, file_name, period, imported_by, summary) VALUES ($1, $2, $3, $4, $5)`,
+          // multer nomni latin1 deb o'qiydi: kirill/o'zbekcha nomlar buzilmasin
+          [fileHash, Buffer.from(req.file!.originalname, 'latin1').toString('utf8'), `${r.period}-01`, u.id, r.summary],
+        );
         return r;
       });
   res.json({ ...report, alreadyImported: previous ?? null });
-});
-
-sheetsRouter.get('/status', async (_req, res) => {
-  const states = await q(
-    pool,
-    `SELECT id, spreadsheet_id AS "spreadsheetId", sheet_title AS "sheetTitle", to_char(period, 'YYYY-MM') AS month,
-            enabled, last_synced_at AS "lastSyncedAt", status, details
-     FROM sheet_sync_state ORDER BY id DESC`,
-  );
-  const errors = await q(
-    pool,
-    `SELECT id, kind, state_id AS "stateId", occurred_at AS "occurredAt", ref, stir, message, raw_value AS "rawValue"
-     FROM sheet_sync_error WHERE NOT resolved AND kind = 'SYNC' ORDER BY occurred_at DESC LIMIT 200`,
-  );
-  res.json({
-    googleConfigured: googleConfigured(),
-    defaultSpreadsheetId: config.google.sheetId || null,
-    intervalMinutes: 5,
-    states,
-    errors,
-  });
-});
-
-sheetsRouter.put('/config', async (req, res) => {
-  const u = me(req);
-  const body = parse(
-    z.object({
-      spreadsheetId: z.string().min(10),
-      sheetTitle: z.string().min(1).max(200),
-      month: z.string(),
-      enabled: z.boolean().default(true),
-    }),
-    req.body,
-  );
-  const period = periodFromMonth(body.month);
-  const row = await tx(async (db) => {
-    const r = await one(
-      db,
-      `INSERT INTO sheet_sync_state (spreadsheet_id, sheet_title, period, enabled) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (spreadsheet_id, sheet_title) DO UPDATE SET period = EXCLUDED.period, enabled = EXCLUDED.enabled
-       RETURNING id`,
-      [body.spreadsheetId, body.sheetTitle, period, body.enabled],
-    );
-    await audit(db, { actorId: u.id, entity: 'sheet_sync_state', entityId: r.id, action: 'CONFIG', after: body });
-    return r;
-  });
-  res.json(row);
-});
-
-sheetsRouter.post('/sync', async (req, res) => {
-  const { stateId } = parse(z.object({ stateId: z.coerce.number().int().optional() }), req.body ?? {});
-  if (!googleConfigured()) throw new AppError(400, 'GOOGLE_NOT_CONFIGURED', 'Google service account sozlanmagan');
-  if (!stateId) return res.json(await syncAllEnabled());
-  const s = await one(pool, 'SELECT id, spreadsheet_id, sheet_title FROM sheet_sync_state WHERE id = $1', [stateId]);
-  if (!s) throw notFound('Sinxron sozlamasi');
-  res.json(await syncState(s.id, await googleAdapter(s.spreadsheet_id, s.sheet_title)));
 });
 
 sheetsRouter.get('/review', async (_req, res) => {

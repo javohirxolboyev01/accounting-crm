@@ -18,6 +18,8 @@ export interface ImportRowResult {
 }
 
 export interface ImportReport {
+  /** Fayl turi sarlavhadan aniqlanadi: hisobot jadvali yoki "Бухгалтер ишлари" */
+  kind: 'REPORTS' | 'WORKS';
   dryRun: boolean;
   period: string;
   columns: { header: string; code: string }[];
@@ -34,6 +36,14 @@ const csvEsc = (v: unknown) => {
   const s = String(v ?? '');
   return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
+
+export function toCsv(results: ImportRowResult[]) {
+  const header = ['row', 'stir', 'name', 'action', 'changes', 'review'];
+  const csv = [header, ...results.map((r) => [r.row, r.stir, r.name, r.action, r.changes.join('|'), r.review.join(' | ')])]
+    .map((line) => line.map(csvEsc).join(','))
+    .join('\n');
+  return '\ufeff' + csv;
+}
 
 /**
  * Bir martalik import (B9 1-qism). Dry-run'da chaqiruvchi tranzaksiyani ROLLBACK qiladi:
@@ -147,12 +157,47 @@ export async function importTable(
     await reconcileClient(db, clientId, opts.actorId, period);
 
     // Katak qiymatlari: 1 = DONE, 0 = ochiq, X = qo'llanmaydi. Soliq turiga zid qiymatlar -> review
-    const cells = await q<any>(
-      db,
-      `SELECT report_type_id AS "reportTypeId", applicable, task_id AS "taskId", task_status AS "taskStatus"
-       FROM fn_monthly_grid($1) WHERE client_id = $2`,
-      [period, clientId],
+    const loadCells = () =>
+      q<any>(
+        db,
+        `SELECT report_type_id AS "reportTypeId", applicable, task_id AS "taskId", task_status AS "taskStatus"
+         FROM fn_monthly_grid($1) WHERE client_id = $2`,
+        [period, clientId],
+      );
+    let cells = await loadCells();
+
+    // Rahbar qarori: soliq turi bo'yicha topshiriladigan katakda X -> mijoz bu hisobotni doimiy topshirmaydi
+    // (client_report_exclusion, shu davrdan). Belgilangan hisobotda 0/1 -> belgi olinadi. Keyin davr qayta moslanadi.
+    const excluded = new Set(
+      (await q<{ id: number }>(db, 'SELECT report_type_id AS id FROM client_report_exclusion WHERE client_id = $1', [clientId])).map((e) => Number(e.id)),
     );
+    let exclusionsChanged = false;
+    for (const col of map.reports) {
+      const v = parseCell(row[col.col]);
+      const cell = cells.find((c) => c.reportTypeId === col.reportTypeId);
+      if (!cell || v === null || v === '') continue;
+      if (v === 'X' && cell.applicable) {
+        await db.query(
+          `INSERT INTO client_report_exclusion (client_id, report_type_id, effective_from, created_by) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (client_id, report_type_id) DO UPDATE SET effective_from = least(client_report_exclusion.effective_from, EXCLUDED.effective_from)`,
+          [clientId, col.reportTypeId, period, opts.actorId],
+        );
+        await audit(db, { actorId: opts.actorId, entity: 'client', entityId: clientId, clientId, action: 'REPORT_EXCLUDE', after: { report: col.code, from: period.slice(0, 7), source: 'IMPORT' } });
+        res.changes.push(`${col.code}=X`);
+        exclusionsChanged = true;
+      } else if (v !== 'X' && !cell.applicable && excluded.has(col.reportTypeId)) {
+        await db.query('DELETE FROM client_report_exclusion WHERE client_id = $1 AND report_type_id = $2', [clientId, col.reportTypeId]);
+        await audit(db, { actorId: opts.actorId, entity: 'client', entityId: clientId, clientId, action: 'REPORT_INCLUDE', before: { report: col.code }, after: { source: 'IMPORT' } });
+        res.changes.push(`${col.code}≠X`);
+        exclusionsChanged = true;
+      }
+    }
+    if (exclusionsChanged) {
+      await reconcileClient(db, clientId, opts.actorId, period);
+      cells = await loadCells();
+      if (res.action === 'UNCHANGED') res.action = 'UPDATED';
+    }
+
     for (const col of map.reports) {
       const v = parseCell(row[col.col]);
       const raw = cellText(row[col.col]).trim();
@@ -163,12 +208,10 @@ export async function importTable(
       if (v === '') continue;
       const cell = cells.find((c) => c.reportTypeId === col.reportTypeId);
       if (!cell) {
-        if (v === '1') res.review.push(`${col.code}: bu oyda hisobot davri emas, lekin "1" qo'yilgan`);
+        if (v === '1') res.review.push(`${col.code}: hisobot turi faol emas, lekin "1" qo'yilgan`);
         continue;
       }
-      if (v === 'X' && cell.applicable) {
-        res.review.push(`${col.code}: jadvalda X, lekin ${taxType} bo'yicha topshirilishi kerak`);
-      } else if (v !== 'X' && !cell.applicable) {
+      if (v !== 'X' && !cell.applicable) {
         res.review.push(`${col.code}: jadvalda "${v}", lekin ${taxType} bo'yicha topshirilmaydi (X bo'lishi kerak)`);
       } else if (v === '1' && cell.taskId && cell.taskStatus !== 'DONE') {
         // Import paytida rahbarlarga ommaviy xabar yuborilmaydi
@@ -199,12 +242,8 @@ export async function importTable(
     });
   }
 
-  const header = ['row', 'stir', 'name', 'action', 'changes', 'review'];
-  const csv = [header, ...results.map((r) => [r.row, r.stir, r.name, r.action, r.changes.join('|'), r.review.join(' | ')])]
-    .map((line) => line.map(csvEsc).join(','))
-    .join('\n');
-
   return {
+    kind: 'REPORTS',
     dryRun: opts.dryRun,
     period: period.slice(0, 7),
     columns: map.reports.map((c) => ({ header: c.header, code: c.code })),
@@ -218,6 +257,6 @@ export async function importTable(
       cellsDone,
     },
     rows: results,
-    csv: '﻿' + csv,
+    csv: toCsv(results),
   };
 }

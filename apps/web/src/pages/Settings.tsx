@@ -121,10 +121,15 @@ function ReportTypesTab() {
                     </td>
                     <td className="px-3 py-2 text-xs">{t(`settings.freq.${r.frequency}`)}</td>
                     <td className="px-3 py-2">
-                      <Input type="number" min={1} max={31} className="h-8 w-20" value={r.dueDay ?? ''} placeholder="?" onChange={(e) => update(r.id, { dueDay: e.target.value ? Number(e.target.value) : null })} aria-label={t('settings.field.dueDay')} />
+                      {/* Yillik hisobotlarda muddat kuni yo'q (V16): katak har oy chiqadi, muddati o'tmaydi */}
+                      {r.frequency === 'YEARLY' ? (
+                        <span className="text-xs text-gray-400">—</span>
+                      ) : (
+                        <Input type="number" min={1} max={31} className="h-8 w-20" value={r.dueDay ?? ''} placeholder="?" onChange={(e) => update(r.id, { dueDay: e.target.value ? Number(e.target.value) : null })} aria-label={t('settings.field.dueDay')} />
+                      )}
                     </td>
                     <td className="px-3 py-2">
-                      {r.frequency === 'MONTHLY' ? (
+                      {r.frequency === 'MONTHLY' || r.generationMonths?.length === 12 ? (
                         <span className="text-xs text-gray-400">{t('settings.everyMonth')}</span>
                       ) : (
                         <Input

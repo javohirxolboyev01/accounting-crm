@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { NoteCell } from '@/components/NoteCell';
+import { SheetImportActions } from '@/components/SheetImport';
 import { Button } from '@/components/ui/button';
 import { Card, PageHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,6 +25,9 @@ const CELL: Record<CellState, { sym: string; cls: string }> = {
   '!': { sym: '!', cls: 'bg-overdue-bg text-overdue font-bold hover:bg-red-200' },
   X: { sym: '—', cls: 'bg-gray-100 font-semibold text-gray-600 dark:text-on-brand' },
 };
+
+// Sarlavha ostida muddat sanasi ko'rsatilmaydigan ustunlar (rahbar talabi)
+const NO_DUE_DATE = new Set(['INPS', 'PORUCHENYA_JSHDS', 'DIVIDEND', 'MOLIYAVIY_NATIJA', 'BALANS', 'STATISTIKA']);
 
 export default function Monthly() {
   const { t, i18n } = useTranslation();
@@ -49,11 +53,14 @@ export default function Monthly() {
       <PageHeader
         title={t('monthly.title')}
         actions={
+          <>
+          {isLeader && <SheetImportActions kind="REPORTS" />}
           <div className="flex items-center gap-1">
             <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, -1))} aria-label={t('common.prev')}><ChevronLeft className="h-4 w-4" /></Button>
             <span className="min-w-[140px] text-center text-sm font-medium capitalize">{monthLabel(month, t('months', { returnObjects: true }) as string[])}</span>
             <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, 1))} aria-label={t('common.next')}><ChevronRight className="h-4 w-4" /></Button>
           </div>
+          </>
         }
       />
       <Card>
@@ -96,8 +103,8 @@ export default function Monthly() {
                     <th className="sticky top-0 z-10 border-r border-brand-400 px-2 py-2.5 text-xs">{t('clients.taxType')}</th>
                     {g.columns.map((c) => (
                       <th key={c.reportTypeId} className="sticky top-0 z-10 min-w-[92px] border-r border-brand-400 px-2 py-2.5 text-center text-xs" title={colName(c)}>
-                        <div className="mx-auto max-w-[120px] truncate">{colShort(c)}</div>
-                        <div className="font-normal text-on-brand/80">{c.dueDate ? fmtIsoDate(c.dueDate) : '—'}</div>
+                        <div className="mx-auto max-w-[150px] whitespace-normal leading-tight">{colShort(c)}</div>
+                        {!NO_DUE_DATE.has(c.code) && <div className="font-normal text-on-brand/80">{c.dueDate ? fmtIsoDate(c.dueDate) : '—'}</div>}
                       </th>
                     ))}
                     <th className="sticky top-0 z-10 w-[300px] min-w-[300px] max-w-[300px] px-3 py-2.5 text-left text-xs">{t('monthly.note')}</th>

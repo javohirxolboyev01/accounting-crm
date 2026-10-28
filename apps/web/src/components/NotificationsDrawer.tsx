@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
-import { CheckCheck, CircleCheck, Clock, Siren, X, type LucideIcon } from 'lucide-react';
+import { CheckCheck, CircleCheck, Clock, Handshake, Siren, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { Pagination } from '@/components/ui/pagination';
 import { Empty, QueryState } from '@/components/ui/states';
 import { api, qs } from '@/lib/api';
@@ -19,6 +20,7 @@ const params = (n: AppNotification, t: TFunction) => {
     due: p.dueAt ? fmtDateTime(p.dueAt) : '—',
     assignee: p.assigneeName ?? '—',
     createdBy: p.createdByName ?? '',
+    lead: p.leadName ?? '',
   };
 };
 
@@ -32,12 +34,14 @@ const KIND_STYLE: Record<NotificationKind, { icon: LucideIcon; border: string; t
   URGENT_TASK: { icon: Siren, border: 'border-l-red-500', tile: 'bg-red-50 text-red-500' },
   TASK_OVERDUE: { icon: Clock, border: 'border-l-amber-400', tile: 'bg-amber-50 text-amber-500' },
   TASK_DONE: { icon: CircleCheck, border: 'border-l-green-500', tile: 'bg-green-50 text-green-600' },
+  LEAD_WON: { icon: Handshake, border: 'border-l-brand-500', tile: 'bg-brand-50 text-brand-600' },
 };
 
 /** Bildirishnomalar: alohida sahifa emas, headerdagi qo'ng'iroqdan o'ngdan ochiladigan panel */
 export function NotificationsDrawer({ open, onClose, onOpenTask }: { open: boolean; onClose: () => void; onOpenTask: (id: number) => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const q = useQuery({
     queryKey: ['notifications', 'list', page],
@@ -110,6 +114,9 @@ export function NotificationsDrawer({ open, onClose, onOpenTask }: { open: boole
                         if (n.taskId) {
                           onClose();
                           onOpenTask(n.taskId);
+                        } else if (n.payload?.leadId) {
+                          onClose();
+                          navigate(`/leads?lead=${n.payload.leadId}`);
                         }
                       }}
                     >

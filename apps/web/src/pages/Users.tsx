@@ -117,6 +117,7 @@ export default function Users() {
                 options={[
                   { value: 'ACCOUNTANT', label: t('roles.ACCOUNTANT') },
                   { value: 'LEADER', label: t('roles.LEADER') },
+                  { value: 'OPERATOR', label: t('roles.OPERATOR') },
                 ]}
               />
             </Field>

@@ -1,14 +1,21 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { me, requireAuth } from '../common/auth';
+import { me, requireAuth, type Role } from '../common/auth';
 import { notFound, parse } from '../common/errors';
 import { type Db, one, pool, q } from '../db';
 import { emitToUser } from './events';
 import { renderNotification } from './messages';
 import { sendTelegram, telegramEnabled } from './telegram';
 
-export const NOTIFICATION_KINDS = ['TASK_DONE', 'TASK_OVERDUE', 'URGENT_TASK'] as const;
+export const NOTIFICATION_KINDS = ['TASK_DONE', 'TASK_OVERDUE', 'URGENT_TASK', 'LEAD_WON'] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+/** Profil sozlamasida ko'rinadigan turlar: kimga qaysi xabar umuman kelishi mumkin */
+export function notificationKindsFor(role: Role): readonly NotificationKind[] {
+  if (role === 'LEADER') return NOTIFICATION_KINDS;
+  if (role === 'ACCOUNTANT') return ['TASK_DONE', 'TASK_OVERDUE', 'URGENT_TASK'];
+  return [];
+}
 
 export interface EnqueueInput {
   userId: number;
