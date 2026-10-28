@@ -5,6 +5,7 @@ import { me, requireAuth, requireLeader } from '../common/auth';
 import { audit, diff } from '../common/audit';
 import { AppError, notFound, parse } from '../common/errors';
 import { type Db, one, pool, q, tx } from '../db';
+import { sharePercent } from './clients';
 
 // Sozlamalar: hamma o'qiydi, faqat rahbar yozadi. O'zgarishlar mavjud vazifalarga tegmaydi
 // (keyingi generatsiyadan kuchga kiradi).
@@ -236,19 +237,31 @@ settingsRouter.delete('/urgent-templates/:id', requireLeader, async (req, res) =
 // ---------- Umumiy ----------
 settingsRouter.get('/general', async (_req, res) => {
   const r = await one<{ value: string }>(pool, `SELECT value FROM setting WHERE key = 'task_due_time'`);
-  res.json({ taskDueTime: r?.value ?? '18:00' });
+  res.json({ taskDueTime: r?.value ?? '18:00', accountantSharePercent: await sharePercent(pool) });
 });
 
 settingsRouter.put('/general', requireLeader, async (req, res) => {
   const u = me(req);
-  const { taskDueTime } = parse(z.object({ taskDueTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }), req.body);
+  const body = parse(
+    z.object({
+      taskDueTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+      // "Бухгалтер ишлари" faylidagi 30% (buxgalterlar ulushi)
+      accountantSharePercent: z.number().min(0).max(100).optional(),
+    }),
+    req.body,
+  );
+  const KEYS = { taskDueTime: 'task_due_time', accountantSharePercent: 'accountant_share_percent' } as const;
   await tx(async (db) => {
-    const before = await one(db, `SELECT value FROM setting WHERE key = 'task_due_time'`);
-    await db.query(
-      `INSERT INTO setting (key, value) VALUES ('task_due_time', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [JSON.stringify(taskDueTime)],
-    );
-    await audit(db, { actorId: u.id, entity: 'setting', entityId: 'task_due_time', action: 'UPDATE', before: { taskDueTime: before?.value ?? null }, after: { taskDueTime } });
+    for (const [field, key] of Object.entries(KEYS) as [keyof typeof KEYS, string][]) {
+      if (body[field] === undefined) continue;
+      const before = await one(db, `SELECT value FROM setting WHERE key = $1`, [key]);
+      await db.query(
+        `INSERT INTO setting (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [key, JSON.stringify(body[field])],
+      );
+      await audit(db, { actorId: u.id, entity: 'setting', entityId: key, action: 'UPDATE', before: { [field]: before?.value ?? null }, after: { [field]: body[field] } });
+    }
   });
-  res.json({ taskDueTime });
+  const r = await one<{ value: string }>(pool, `SELECT value FROM setting WHERE key = 'task_due_time'`);
+  res.json({ taskDueTime: r?.value ?? '18:00', accountantSharePercent: await sharePercent(pool) });
 });

@@ -4,14 +4,64 @@ import { type AuthUser, isLeader, me, requireAuth } from '../common/auth';
 import { audit, diff } from '../common/audit';
 import { AppError, forbidden, notFound, parse } from '../common/errors';
 import { normalizeName, normalizeStir } from '../common/normalize';
+import { decryptSecret, encryptSecret } from '../common/secretBox';
 import { currentPeriod } from '../common/time';
 import { type Db, one, pool, q, tx } from '../db';
 import { reassignOpenTasks, reconcileClient } from './generator';
 
-const CLIENT = `c.id, c.stir, c.name, c.contact_person AS "contactPerson", c.phone, c.tax_type AS "taxType",
+export const CLIENT = `c.id, c.stir, c.name, c.contact_person AS "contactPerson", c.phone, c.tax_type AS "taxType",
   c.tax_type_effective_from AS "taxTypeEffectiveFrom", c.accountant_id AS "accountantId",
-  a.full_name AS "accountantName", c.status, c.note, c.created_at AS "createdAt", c.updated_at AS "updatedAt"`;
-const FROM = `FROM client c LEFT JOIN app_user a ON a.id = c.accountant_id`;
+  a.full_name AS "accountantName", c.status, c.note, c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+  c.monthly_fee AS "monthlyFee", c.bank_key AS "bankKey", c.employee_count AS "employeeCount",
+  c.mehnat_checked_at AS "mehnatCheckedAt", c.mehnat_login AS "mehnatLogin",
+  (c.mehnat_password_enc IS NOT NULL) AS "hasMehnatPassword"`;
+export const FROM = `FROM client c LEFT JOIN app_user a ON a.id = c.accountant_id`;
+
+/** Buxgalter ulushi foizi (sozlamada, standart 30) */
+export async function sharePercent(db: Db): Promise<number> {
+  const r = await one<{ value: unknown }>(db, `SELECT value FROM setting WHERE key = 'accountant_share_percent'`);
+  return typeof r?.value === 'number' ? r.value : 30;
+}
+
+/**
+ * Javobga chiqarish: ulush hisoblanadi (saqlanmaydi); oylik to'lovni faqat rahbar ko'radi,
+ * buxgalter faqat o'z ulushini (TODO(tasdiqlash): rahbar qarori, 2026-10-28).
+ */
+export function presentClient<T extends { monthlyFee?: number | null }>(c: T, u: AuthUser, pct: number) {
+  const accountantShare = c.monthlyFee == null ? null : Math.round((c.monthlyFee * pct) / 100);
+  return { ...c, monthlyFee: isLeader(u) ? c.monthlyFee : undefined, accountantShare };
+}
+
+/** Audit uchun: ochiq parol hech qachon audit_log'ga tushmaydi, faqat "o'zgardi" belgisi */
+function auditSafe<T extends { mehnatPassword?: string | null }>(body: T) {
+  const { mehnatPassword, ...rest } = body;
+  return mehnatPassword === undefined ? rest : { ...rest, mehnatPassword: mehnatPassword ? '••••••' : null };
+}
+
+/** Mijozlar ro'yxati filtri: /clients va /works bir xil qoidada (buxgalter faqat o'z mijozlari, serverda) */
+export const clientListQuery = z.object({
+  search: z.string().trim().optional(),
+  status: z.enum(['ACTIVE', 'ZERO_REPORT', 'LIQUIDATING']).optional(),
+  taxType: z.enum(['AOS', 'QQS']).optional(),
+  accountantId: z.union([z.coerce.number().int(), z.literal('none')]).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(25),
+});
+
+export function clientListWhere(u: AuthUser, f: z.infer<typeof clientListQuery>, p: (v: unknown) => string) {
+  const where: string[] = [];
+  if (!isLeader(u)) where.push(`c.accountant_id = ${p(u.id)}`); // serverda cheklov
+  if (f.search) {
+    const s = normalizeName(f.search);
+    const digits = f.search.replace(/\D/g, '');
+    where.push(`(c.name_normalized ILIKE ${p(`%${s}%`)} ${digits.length >= 3 ? `OR c.stir LIKE ${p(`${digits}%`)}` : ''})`);
+  }
+  if (f.status) where.push(`c.status = ${p(f.status)}`);
+  if (f.taxType) where.push(`c.tax_type = ${p(f.taxType)}`);
+  if (f.accountantId === 'none') where.push('c.accountant_id IS NULL');
+  else if (f.accountantId) where.push(`c.accountant_id = ${p(f.accountantId)}`);
+  return where.length ? `WHERE ${where.join(' AND ')}` : '';
+}
 
 const stirSchema = z
   .string()
@@ -31,6 +81,14 @@ export const clientInput = z.object({
   accountantId: z.number().int().positive().nullable().optional(),
   status: z.enum(['ACTIVE', 'ZERO_REPORT', 'LIQUIDATING']).default('ACTIVE'),
   note: z.string().max(5000).nullable().optional(),
+  // "Бухгалтер ишлари" fayli ustunlari
+  monthlyFee: z.number().int().min(0).max(1_000_000_000_000).nullable().optional(),
+  bankKey: z.boolean().nullable().optional(),
+  employeeCount: z.number().int().min(0).max(100_000).nullable().optional(),
+  mehnatCheckedAt: isoDate.nullable().optional(),
+  mehnatLogin: z.string().trim().max(200).nullable().optional(),
+  // Faqat yoziladi (javobda qaytmaydi); bo'sh satr = o'chirish
+  mehnatPassword: z.string().max(200).nullable().optional(),
 });
 
 async function assertAccountant(db: Db, id: number | null | undefined) {
@@ -61,8 +119,9 @@ export async function createClient(db: Db, input: z.infer<typeof clientInput>, a
   const c = await one(
     db,
     `INSERT INTO client (stir, name, name_normalized, contact_person, phone, tax_type, tax_type_effective_from,
-                         accountant_id, status, note)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+                         accountant_id, status, note, monthly_fee, bank_key, employee_count, mehnat_checked_at,
+                         mehnat_login, mehnat_password_enc)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
     [
       input.stir,
       input.name,
@@ -74,11 +133,17 @@ export async function createClient(db: Db, input: z.infer<typeof clientInput>, a
       input.accountantId ?? null,
       input.status,
       input.note ?? null,
+      input.monthlyFee ?? null,
+      input.bankKey ?? null,
+      input.employeeCount ?? null,
+      input.mehnatCheckedAt ?? null,
+      input.mehnatLogin || null,
+      input.mehnatPassword ? encryptSecret(input.mehnatPassword) : null,
     ],
   );
   // Boshlang'ich tur: "qachondan" berilmasa, butun o'tmish uchun amal qiladi
   await recordTaxType(db, c.id, input.taxType, input.taxTypeEffectiveFrom ?? '2000-01-01', actorId);
-  await audit(db, { actorId, entity: 'client', entityId: c.id, clientId: c.id, action: 'CREATE', after: input });
+  await audit(db, { actorId, entity: 'client', entityId: c.id, clientId: c.id, action: 'CREATE', after: auditSafe(input) });
   // Oy o'rtasida qo'shilgan mijozga joriy oy vazifalari darhol yaratiladi
   await reconcileClient(db, c.id, actorId);
   return c.id as number;
@@ -89,31 +154,10 @@ clientsRouter.use(requireAuth);
 
 clientsRouter.get('/', async (req, res) => {
   const u = me(req);
-  const f = parse(
-    z.object({
-      search: z.string().trim().optional(),
-      status: z.enum(['ACTIVE', 'ZERO_REPORT', 'LIQUIDATING']).optional(),
-      taxType: z.enum(['AOS', 'QQS']).optional(),
-      accountantId: z.union([z.coerce.number().int(), z.literal('none')]).optional(),
-      page: z.coerce.number().int().min(1).default(1),
-      pageSize: z.coerce.number().int().min(1).max(500).default(25),
-    }),
-    req.query,
-  );
-  const where: string[] = [];
+  const f = parse(clientListQuery, req.query);
   const params: unknown[] = [];
   const p = (v: unknown) => (params.push(v), `$${params.length}`);
-  if (!isLeader(u)) where.push(`c.accountant_id = ${p(u.id)}`); // serverda cheklov
-  if (f.search) {
-    const s = normalizeName(f.search);
-    const digits = f.search.replace(/\D/g, '');
-    where.push(`(c.name_normalized ILIKE ${p(`%${s}%`)} ${digits.length >= 3 ? `OR c.stir LIKE ${p(`${digits}%`)}` : ''})`);
-  }
-  if (f.status) where.push(`c.status = ${p(f.status)}`);
-  if (f.taxType) where.push(`c.tax_type = ${p(f.taxType)}`);
-  if (f.accountantId === 'none') where.push('c.accountant_id IS NULL');
-  else if (f.accountantId) where.push(`c.accountant_id = ${p(f.accountantId)}`);
-  const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const w = clientListWhere(u, f, p);
   const total = (await one<{ n: number }>(pool, `SELECT count(*) AS n FROM client c ${w}`, params))!.n;
   const items = await q(
     pool,
@@ -125,12 +169,14 @@ clientsRouter.get('/', async (req, res) => {
      ${FROM} ${w} ORDER BY c.name_normalized LIMIT ${p(f.pageSize)} OFFSET ${p((f.page - 1) * f.pageSize)}`,
     params,
   );
-  res.json({ items, total, page: f.page, pageSize: f.pageSize });
+  const pct = await sharePercent(pool);
+  res.json({ items: items.map((c) => presentClient(c, u, pct)), total, page: f.page, pageSize: f.pageSize });
 });
 
 clientsRouter.get('/:id', async (req, res) => {
+  const u = me(req);
   const id = parse(z.coerce.number().int(), req.params.id);
-  const c = await loadClientForUser(pool, id, me(req));
+  const c = presentClient(await loadClientForUser(pool, id, u), u, await sharePercent(pool));
   const taxHistory = await q(
     pool,
     `SELECT h.id, h.tax_type AS "taxType", h.effective_from AS "effectiveFrom", h.created_at AS "createdAt",
@@ -146,12 +192,15 @@ clientsRouter.get('/:id', async (req, res) => {
 });
 
 clientsRouter.get('/:id/history', async (req, res) => {
+  const u = me(req);
   const id = parse(z.coerce.number().int(), req.params.id);
-  await loadClientForUser(pool, id, me(req));
+  await loadClientForUser(pool, id, u);
+  // Buxgalter tarix orqali ham oylik to'lovni ko'rmasin
+  const hide = (col: string) => (isLeader(u) ? `l.${col}` : `CASE WHEN jsonb_typeof(l.${col}) = 'object' THEN l.${col} - 'monthlyFee' ELSE l.${col} END`);
   res.json(
     await q(
       pool,
-      `SELECT l.id, l.entity, l.entity_id AS "entityId", l.action, l.before, l.after, l.at,
+      `SELECT l.id, l.entity, l.entity_id AS "entityId", l.action, ${hide('before')} AS before, ${hide('after')} AS after, l.at,
               u.full_name AS "actorName"
        FROM audit_log l LEFT JOIN app_user u ON u.id = l.actor_id
        WHERE l.client_id = $1 ORDER BY l.at DESC, l.id DESC LIMIT 200`,
@@ -165,7 +214,7 @@ clientsRouter.post('/', async (req, res) => {
   if (!isLeader(u)) throw forbidden();
   const input = parse(clientInput, req.body);
   const id = await tx((db) => createClient(db, input, u.id));
-  res.status(201).json(await loadClientForUser(pool, id, u));
+  res.status(201).json(presentClient(await loadClientForUser(pool, id, u), u, await sharePercent(pool)));
 });
 
 clientsRouter.patch('/:id', async (req, res) => {
@@ -174,14 +223,18 @@ clientsRouter.patch('/:id', async (req, res) => {
   const body = parse(clientInput.partial().omit({ status: true }).extend({
     status: z.enum(['ACTIVE', 'ZERO_REPORT', 'LIQUIDATING']).optional(),
   }), req.body);
-  // TODO(tasdiqlash): buxgalter faqat aloqa ma'lumotlari va izohni o'zgartira oladi
-  const ACCOUNTANT_FIELDS = ['contactPerson', 'phone', 'note'];
+  // TODO(tasdiqlash): buxgalter aloqa ma'lumotlari, izoh, bank-kalit va my.mehnat.uz ma'lumotlarini o'zgartira oladi;
+  // oylik to'lov, soliq turi, holat, buxgalter — faqat rahbar
+  const ACCOUNTANT_FIELDS = ['contactPerson', 'phone', 'note', 'bankKey', 'employeeCount', 'mehnatCheckedAt', 'mehnatLogin', 'mehnatPassword'];
   if (!isLeader(u) && Object.keys(body).some((k) => !ACCOUNTANT_FIELDS.includes(k))) throw forbidden();
+  // Parol diff'ga kirmaydi (oldingi qiymat ochilmaydi): berilgan bo'lsa har doim yoziladi
+  const pwChanged = body.mehnatPassword !== undefined;
 
   await tx(async (db) => {
     const before = await loadClientForUser(db, id, u, true);
-    const d = diff(before, body);
-    if (!d.changed) return;
+    const { mehnatPassword: _pw, ...rest } = body;
+    const d = diff(before, rest);
+    if (!d.changed && !pwChanged) return;
     if (body.accountantId !== undefined) await assertAccountant(db, body.accountantId);
 
     const taxChanged = body.taxType !== undefined && body.taxType !== before.taxType;
@@ -197,7 +250,13 @@ clientsRouter.patch('/:id', async (req, res) => {
          tax_type_effective_from = CASE WHEN $10 THEN $11::date ELSE tax_type_effective_from END,
          accountant_id = CASE WHEN $12 THEN $13::bigint ELSE accountant_id END,
          status = coalesce($14, status),
-         note = CASE WHEN $15 THEN $16 ELSE note END
+         note = CASE WHEN $15 THEN $16 ELSE note END,
+         monthly_fee = CASE WHEN $17 THEN $18::numeric ELSE monthly_fee END,
+         bank_key = CASE WHEN $19 THEN $20::boolean ELSE bank_key END,
+         employee_count = CASE WHEN $21 THEN $22::int ELSE employee_count END,
+         mehnat_checked_at = CASE WHEN $23 THEN $24::date ELSE mehnat_checked_at END,
+         mehnat_login = CASE WHEN $25 THEN $26 ELSE mehnat_login END,
+         mehnat_password_enc = CASE WHEN $27 THEN $28 ELSE mehnat_password_enc END
        WHERE id = $1`,
       [
         id,
@@ -216,12 +275,33 @@ clientsRouter.patch('/:id', async (req, res) => {
         body.status ?? null,
         body.note !== undefined,
         body.note ?? null,
+        body.monthlyFee !== undefined,
+        body.monthlyFee ?? null,
+        body.bankKey !== undefined,
+        body.bankKey ?? null,
+        body.employeeCount !== undefined,
+        body.employeeCount ?? null,
+        body.mehnatCheckedAt !== undefined,
+        body.mehnatCheckedAt ?? null,
+        body.mehnatLogin !== undefined,
+        body.mehnatLogin || null,
+        pwChanged,
+        body.mehnatPassword ? encryptSecret(body.mehnatPassword) : null,
       ],
     );
     if (taxChanged || (body.taxTypeEffectiveFrom && body.taxType)) {
       await recordTaxType(db, id, body.taxType ?? before.taxType, effectiveFrom!, u.id);
     }
-    await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'UPDATE', before: d.before, after: d.after });
+    const pwAudit = pwChanged ? auditSafe({ mehnatPassword: body.mehnatPassword }) : {};
+    await audit(db, {
+      actorId: u.id,
+      entity: 'client',
+      entityId: id,
+      clientId: id,
+      action: 'UPDATE',
+      before: { ...d.before, ...(pwChanged && before.hasMehnatPassword ? { mehnatPassword: '••••••' } : {}) },
+      after: { ...d.after, ...pwAudit },
+    });
 
     // 6.8: buxgalter almashsa ochiq vazifalar yangisiga o'tadi
     if (body.accountantId !== undefined && body.accountantId !== before.accountantId) {
@@ -232,7 +312,21 @@ clientsRouter.patch('/:id', async (req, res) => {
       await reconcileClient(db, id, u.id);
     }
   });
-  res.json(await loadClientForUser(pool, id, u));
+  res.json(presentClient(await loadClientForUser(pool, id, u), u, await sharePercent(pool)));
+});
+
+/** my.mehnat.uz parolini ochish: rahbar yoki mijozning buxgalteri; har ochish audit_log'da (qiymatsiz) */
+clientsRouter.post('/:id/mehnat-password/reveal', async (req, res) => {
+  const u = me(req);
+  const id = parse(z.coerce.number().int(), req.params.id);
+  const password = await tx(async (db) => {
+    await loadClientForUser(db, id, u);
+    const r = await one<{ enc: string | null }>(db, 'SELECT mehnat_password_enc AS enc FROM client WHERE id = $1', [id]);
+    if (!r?.enc) throw notFound('Parol');
+    await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'REVEAL_MEHNAT_PASSWORD' });
+    return decryptSecret(r.enc);
+  });
+  res.json({ password });
 });
 
 // ---------- Dividend belgisi ----------

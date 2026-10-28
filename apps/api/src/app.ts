@@ -18,6 +18,7 @@ import { settingsRouter } from './modules/settings';
 import { sheetsRouter } from './modules/sheets/routes';
 import { tasksRouter } from './modules/tasks';
 import { usersRouter } from './modules/users';
+import { worksRouter } from './modules/works';
 
 export function createApp() {
   const app = express();
@@ -46,6 +47,7 @@ export function createApp() {
   app.use('/api/tasks', tasksRouter);
   app.use('/api/generator', generatorRouter);
   app.use('/api/monthly-grid', gridRouter);
+  app.use('/api/works', worksRouter);
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/dashboard', dashboardRouter);
   app.use('/api/audit', auditRouter);

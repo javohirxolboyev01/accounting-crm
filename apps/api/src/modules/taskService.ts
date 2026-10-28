@@ -119,7 +119,7 @@ export async function changeStatus(db: Db, taskId: number, user: AuthUser, next:
 export interface MarkDoneOptions {
   /** false: import paytida rahbarlarga xabar yuborilmaydi */
   notify?: boolean;
-  source?: 'APP' | 'GRID' | 'SHEET' | 'IMPORT';
+  source?: 'APP' | 'GRID' | 'WORKS' | 'SHEET' | 'IMPORT';
 }
 
 /**

@@ -53,6 +53,15 @@ export interface Client {
   updatedAt: string;
   openTasks?: number;
   overdueTasks?: number;
+  /** Faqat rahbarga keladi */
+  monthlyFee?: number | null;
+  /** Buxgalter ulushi (oylik to'lov x foiz), serverda hisoblanadi */
+  accountantShare: number | null;
+  bankKey: boolean | null;
+  employeeCount: number | null;
+  mehnatCheckedAt: string | null;
+  mehnatLogin: string | null;
+  hasMehnatPassword: boolean;
 }
 
 export interface ClientCard extends Client {
@@ -130,6 +139,7 @@ export interface GridRow {
   name: string;
   taxType: TaxType;
   status: ClientStatus;
+  note: string | null;
   accountantId: number | null;
   accountantName: string | null;
   cells: Record<number, { state: CellState; taskId: number | null; taskStatus: TaskStatus | null }>;
@@ -140,6 +150,61 @@ export interface Grid {
   columns: GridColumn[];
   rows: GridRow[];
 }
+
+/** Oylik ishlar ("Бухгалтер ишлари"): katakda "qaysi oygacha bajarilgan" (works.ts) */
+export type WorkTone = 'done' | 'waiting' | 'overdue' | 'soon';
+
+export interface WorkColumn {
+  routineTypeId: number;
+  name: string;
+  nameRu: string;
+  reportTypeId: number | null;
+  isFreeText: boolean;
+  shortName: string | null;
+  shortNameRu: string | null;
+  group: string | null;
+  groupRu: string | null;
+}
+
+export interface WorkCell {
+  na: boolean;
+  /** 'YYYY-MM' */
+  doneThrough: string | null;
+  baseline: string | null;
+  lag: number;
+  tone: WorkTone | null;
+  next: { kind: 'TASK'; taskId: number; status: TaskStatus; month: string } | { kind: 'BASELINE'; month: string } | null;
+}
+
+export interface WorksRow {
+  clientId: number;
+  stir: string;
+  name: string;
+  taxType: TaxType;
+  status: ClientStatus;
+  note: string | null;
+  accountantId: number | null;
+  accountantName: string | null;
+  monthlyFee?: number | null;
+  accountantShare: number | null;
+  bankKey: boolean | null;
+  employeeCount: number | null;
+  mehnatCheckedAt: string | null;
+  mehnatLogin: string | null;
+  hasMehnatPassword: boolean;
+  cells: Record<number, WorkCell>;
+}
+
+export interface Works extends Paged<WorksRow> {
+  columns: WorkColumn[];
+  /** Joriy oy 'YYYY-MM' */
+  month: string;
+  sharePercent: number;
+}
+
+export type AdvanceResult =
+  | { kind: 'TASK'; task: Task }
+  | { kind: 'BASELINE'; month: string; workName: string; workNameRu: string; clientName: string };
 
 export interface ReportType {
   id: number;

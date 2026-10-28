@@ -35,7 +35,7 @@ export async function loadGrid(
     db,
     `SELECT g.client_id AS "clientId", g.report_type_id AS "reportTypeId", g.tax_type AS "taxType",
             g.task_id AS "taskId", g.task_status AS "taskStatus", g.cell AS state,
-            c.stir, c.name, c.status, c.accountant_id AS "accountantId", a.full_name AS "accountantName"
+            c.stir, c.name, c.status, c.note, c.accountant_id AS "accountantId", a.full_name AS "accountantName"
      FROM fn_monthly_grid($1) g
      JOIN client c ON c.id = g.client_id
      LEFT JOIN app_user a ON a.id = c.accountant_id
@@ -55,6 +55,7 @@ export async function loadGrid(
         name: c.name,
         taxType: c.taxType,
         status: c.status,
+        note: c.note,
         accountantId: c.accountantId,
         accountantName: c.accountantName,
         cells: {} as Record<number, { state: CellState; taskId: number | null; taskStatus: string | null }>,

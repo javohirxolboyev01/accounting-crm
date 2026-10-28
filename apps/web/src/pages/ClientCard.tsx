@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Field, Input, Textarea } from '@/components/ui/input';
+import { Field, Input, NumberInput, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
 import { FormSkeleton, ListSkeleton } from '@/components/ui/skeleton';
@@ -32,9 +32,21 @@ interface Form {
   accountantId: string;
   status: ClientStatus;
   note: string;
+  monthlyFee: string;
+  bankKey: '' | 'yes' | 'no';
+  employeeCount: string;
+  mehnatCheckedAt: string;
+  mehnatLogin: string;
+  /** Yangi parol; bo'sh = o'zgarmaydi */
+  mehnatPassword: string;
+  clearPassword: boolean;
 }
 
-const empty: Form = { stir: '', name: '', contactPerson: '', phone: '', taxType: 'AOS', taxTypeEffectiveFrom: '', accountantId: '', status: 'ACTIVE', note: '' };
+const empty: Form = {
+  stir: '', name: '', contactPerson: '', phone: '', taxType: 'AOS', taxTypeEffectiveFrom: '', accountantId: '', status: 'ACTIVE', note: '',
+  monthlyFee: '', bankKey: '', employeeCount: '', mehnatCheckedAt: '', mehnatLogin: '', mehnatPassword: '', clearPassword: false,
+};
+const numOrNull = (v: string) => (v.trim() === '' ? null : Number(v.replace(/\D/g, '')));
 
 function toForm(c: ClientCardData): Form {
   return {
@@ -47,6 +59,13 @@ function toForm(c: ClientCardData): Form {
     accountantId: c.accountantId ? String(c.accountantId) : '',
     status: c.status,
     note: c.note ?? '',
+    monthlyFee: c.monthlyFee == null ? '' : String(c.monthlyFee),
+    bankKey: c.bankKey == null ? '' : c.bankKey ? 'yes' : 'no',
+    employeeCount: c.employeeCount == null ? '' : String(c.employeeCount),
+    mehnatCheckedAt: c.mehnatCheckedAt ?? '',
+    mehnatLogin: c.mehnatLogin ?? '',
+    mehnatPassword: '',
+    clearPassword: false,
   };
 }
 
@@ -79,7 +98,14 @@ export default function ClientCard() {
       contactPerson: form.contactPerson || null,
       phone: form.phone || null,
       note: form.note || null,
+      bankKey: form.bankKey === '' ? null : form.bankKey === 'yes',
+      employeeCount: numOrNull(form.employeeCount),
+      mehnatCheckedAt: form.mehnatCheckedAt || null,
+      mehnatLogin: form.mehnatLogin || null,
     };
+    // Parol faqat yozilganda yuboriladi (bo'sh satr = o'chirish)
+    if (form.mehnatPassword) body.mehnatPassword = form.mehnatPassword;
+    else if (form.clearPassword) body.mehnatPassword = '';
     if (isLeader) {
       Object.assign(body, {
         stir: form.stir,
@@ -87,6 +113,7 @@ export default function ClientCard() {
         taxType: form.taxType,
         accountantId: form.accountantId ? Number(form.accountantId) : null,
         status: form.status,
+        monthlyFee: numOrNull(form.monthlyFee),
       });
       if (form.taxTypeEffectiveFrom && form.taxTypeEffectiveFrom !== q.data?.taxTypeEffectiveFrom) body.taxTypeEffectiveFrom = form.taxTypeEffectiveFrom;
     }
@@ -116,7 +143,7 @@ export default function ClientCard() {
     else save.mutate();
   };
   const set = (patch: Partial<Form>) => setForm({ ...form, ...patch });
-  const ro = !isLeader; // buxgalter: faqat aloqa va izoh
+  const ro = !isLeader; // buxgalter: aloqa, izoh, bank-kalit va my.mehnat.uz
 
   const content = (
     <div className="grid gap-4 xl:grid-cols-3">
@@ -150,6 +177,53 @@ export default function ClientCard() {
           <div className="sm:col-span-2">
             <Field label={t('clients.note')} htmlFor="note"><Textarea id="note" value={form.note} onChange={(e) => set({ note: e.target.value })} /></Field>
           </div>
+          {/* "Бухгалтер ишлари" fayli ustunlari */}
+          <h3 className="border-t pt-4 text-sm font-semibold text-ink sm:col-span-2">{t('clients.sheetSection')}</h3>
+          {isLeader ? (
+            <Field label={t('clients.monthlyFee')} htmlFor="fee">
+              <NumberInput id="fee" value={form.monthlyFee} onChange={(v) => set({ monthlyFee: v })} />
+            </Field>
+          ) : (
+            <Field label={t('clients.accountantShare')} htmlFor="share">
+              <Input id="share" disabled value={q.data?.accountantShare?.toLocaleString('en-US') ?? ''} />
+            </Field>
+          )}
+          <Field label={t('clients.bankKey')} htmlFor="bankKey">
+            <Select
+              id="bankKey"
+              value={form.bankKey}
+              onChange={(v) => set({ bankKey: v as Form['bankKey'] })}
+              placeholder={t('clients.unknown')}
+              clearable
+              options={[{ value: 'yes', label: t('works.bankYes') }, { value: 'no', label: t('works.bankNo') }]}
+            />
+          </Field>
+          <Field label={t('clients.employeeCount')} htmlFor="emp">
+            <NumberInput id="emp" value={form.employeeCount} onChange={(v) => set({ employeeCount: v })} />
+          </Field>
+          <Field label={t('clients.mehnatCheckedAt')} htmlFor="mehnatAt">
+            <DatePicker id="mehnatAt" value={form.mehnatCheckedAt} clearable onChange={(v) => set({ mehnatCheckedAt: v })} />
+          </Field>
+          <Field label={t('clients.mehnatLogin')} htmlFor="mehnatLogin">
+            <Input id="mehnatLogin" autoComplete="off" value={form.mehnatLogin} onChange={(e) => set({ mehnatLogin: e.target.value })} />
+          </Field>
+          <Field label={t('clients.mehnatPassword')} htmlFor="mehnatPw" hint={q.data?.hasMehnatPassword && !form.clearPassword ? t('clients.mehnatPasswordSet') : t('clients.mehnatPasswordHint')}>
+            <div className="flex gap-2">
+              <Input
+                id="mehnatPw"
+                type="password"
+                autoComplete="new-password"
+                value={form.mehnatPassword}
+                placeholder={q.data?.hasMehnatPassword && !form.clearPassword ? '••••••••' : ''}
+                onChange={(e) => set({ mehnatPassword: e.target.value, clearPassword: false })}
+              />
+              {q.data?.hasMehnatPassword && !form.clearPassword && (
+                <Button variant="outline" size="icon" title={t('clients.clearPassword')} aria-label={t('clients.clearPassword')} onClick={() => set({ mehnatPassword: '', clearPassword: true })}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </Field>
           {q.data && form.accountantId !== String(q.data.accountantId ?? '') && (
             <p className="text-xs text-amber-700 sm:col-span-2">{t('clients.reassignHint')}</p>
           )}

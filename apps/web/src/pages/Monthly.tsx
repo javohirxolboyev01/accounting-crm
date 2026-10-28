@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
+import { NoteCell } from '@/components/NoteCell';
 import { Button } from '@/components/ui/button';
 import { Card, PageHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,7 @@ import { useOpenTask } from '@/hooks/outlet';
 import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
-import { currentMonth, fmtDayMonth, monthLabel, shiftMonth } from '@/lib/time';
+import { currentMonth, fmtIsoDate, monthLabel, shiftMonth } from '@/lib/time';
 import type { CellState, Grid } from '@/lib/types';
 
 const CELL: Record<CellState, { sym: string; cls: string }> = {
@@ -39,6 +40,9 @@ export default function Monthly() {
   });
   const g = q.data;
   const colName = (c: Grid['columns'][number]) => (i18n.language === 'ru' ? c.nameRu : c.name);
+  // Sarlavhalar Google Sheet'dagidek qisqa: JSHDS, To'lov manbai, AOS, QQS, FOYDA, INPS, Poruchenya JSHDS
+  const SHORT: Record<string, string> = { TOLOV_MANBAI: 'monthly.tolovShort', PORUCHENYA_JSHDS: 'monthly.poruchShort', FOYDA: 'monthly.foydaShort' };
+  const colShort = (c: Grid['columns'][number]) => (SHORT[c.code] ? t(SHORT[c.code]) : colName(c));
 
   return (
     <div>
@@ -77,7 +81,7 @@ export default function Monthly() {
             ))}
           </div>
         </div>
-        <QueryState q={q} skeleton={<TableSkeleton rows={12} cols={10} />}>
+        <QueryState q={q} skeleton={<TableSkeleton rows={12} cols={12} />}>
           {!g?.rows?.length && <Empty text={t('monthly.empty')} />}
           {g && g.rows?.length > 0 && (
             // ~100 qator x ~10 ustun: oddiy jadval yetarli (virtualizatsiya shart emas)
@@ -85,24 +89,30 @@ export default function Monthly() {
               <table className="w-full border-separate border-spacing-0 text-sm">
                 <thead className="table-head">
                   <tr>
-                    <th className="sticky left-0 top-0 z-20 min-w-[220px] border-r border-brand-400 px-3 py-2.5 text-left text-xs">{t('monthly.client')}</th>
+                    {/* Ustunlar "Hisobot topshirish jadvali" bilan bir xil: № | STIR | Korxona nomi | Soliq turi | hisobotlar | izoh */}
+                    <th className="sticky left-0 top-0 z-20 w-10 min-w-10 border-r border-brand-400 px-2 py-2.5 text-center text-xs">{t('monthly.no')}</th>
+                    <th className="sticky left-10 top-0 z-20 w-[104px] min-w-[104px] border-r border-brand-400 px-2 py-2.5 text-left text-xs">{t('monthly.stir')}</th>
+                    <th className="sticky left-[144px] top-0 z-20 min-w-[220px] border-r border-brand-400 px-3 py-2.5 text-left text-xs">{t('monthly.company')}</th>
                     <th className="sticky top-0 z-10 border-r border-brand-400 px-2 py-2.5 text-xs">{t('clients.taxType')}</th>
                     {g.columns.map((c) => (
-                      <th key={c.reportTypeId} className="sticky top-0 z-10 min-w-[84px] border-r border-brand-400 px-2 py-2.5 text-center text-xs last:border-r-0" title={colName(c)}>
-                        <div className="max-w-[120px] truncate">{c.code === 'TOLOV_MANBAI' ? t('monthly.tolovShort') : c.code === 'PORUCHENYA_JSHDS' ? t('monthly.poruchShort') : colName(c)}</div>
-                        <div className="font-normal text-on-brand/80">{c.dueDate ? fmtDayMonth(c.dueDate) : '—'}</div>
+                      <th key={c.reportTypeId} className="sticky top-0 z-10 min-w-[92px] border-r border-brand-400 px-2 py-2.5 text-center text-xs" title={colName(c)}>
+                        <div className="mx-auto max-w-[120px] truncate">{colShort(c)}</div>
+                        <div className="font-normal text-on-brand/80">{c.dueDate ? fmtIsoDate(c.dueDate) : '—'}</div>
                       </th>
                     ))}
+                    <th className="sticky top-0 z-10 w-[300px] min-w-[300px] max-w-[300px] px-3 py-2.5 text-left text-xs">{t('monthly.note')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {g.rows.map((r) => (
+                  {g.rows.map((r, i) => (
                     <tr key={r.clientId} className="group">
-                      <td className="sticky left-0 z-10 border-b border-r bg-white p-0 group-hover:bg-gray-100">
+                      <td className="sticky left-0 z-10 border-b border-r bg-white px-2 text-center text-xs text-gray-500 group-hover:bg-gray-100">{i + 1}</td>
+                      <td className="sticky left-10 z-10 border-b border-r bg-white px-2 text-xs tabular-nums group-hover:bg-gray-100">{r.stir}</td>
+                      <td className="sticky left-[144px] z-10 border-b border-r bg-white p-0 group-hover:bg-gray-100">
                         {/* Butun katak bosiladi */}
                         <Link to={`/clients/${r.clientId}`} className="block px-3 py-1.5">
                           <div className="w-fit font-medium text-brand-500 hover:text-ink dark:text-brand-400 dark:hover:text-ink">{r.name}</div>
-                          <div className="text-[11px] text-gray-500">{r.stir} · {r.accountantName ?? '—'}{r.status !== 'ACTIVE' && ` · ${t(`clientStatus.${r.status}`)}`}</div>
+                          <div className="text-[11px] text-gray-500">{r.accountantName ?? '—'}{r.status !== 'ACTIVE' && ` · ${t(`clientStatus.${r.status}`)}`}</div>
                         </Link>
                       </td>
                       <td className="border-b px-2 text-center text-xs">{r.taxType}</td>
@@ -136,6 +146,7 @@ export default function Monthly() {
                           </td>
                         );
                       })}
+                      <NoteCell clientId={r.clientId} clientName={r.name} note={r.note} />
                     </tr>
                   ))}
                 </tbody>
@@ -148,3 +159,4 @@ export default function Monthly() {
     </div>
   );
 }
+

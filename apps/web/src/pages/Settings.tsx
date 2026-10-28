@@ -308,12 +308,20 @@ function TemplatesTab() {
 function GeneralTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ['settings', 'general'], queryFn: () => api.get<{ taskDueTime: string }>('/settings/general') });
+  const q = useQuery({ queryKey: ['settings', 'general'], queryFn: () => api.get<{ taskDueTime: string; accountantSharePercent: number }>('/settings/general') });
   const [time, setTime] = useState('');
-  useEffect(() => setTime(q.data?.taskDueTime ?? ''), [q.data]);
+  const [pct, setPct] = useState('');
+  useEffect(() => {
+    setTime(q.data?.taskDueTime ?? '');
+    setPct(q.data ? String(q.data.accountantSharePercent) : '');
+  }, [q.data]);
   const save = useMutation({
-    mutationFn: () => api.put('/settings/general', { taskDueTime: time }),
-    onSuccess: () => { toast.success(t('common.saved')); void qc.invalidateQueries({ queryKey: ['settings', 'general'] }); },
+    mutationFn: (body: { taskDueTime?: string; accountantSharePercent?: number }) => api.put('/settings/general', body),
+    onSuccess: () => {
+      toast.success(t('common.saved'));
+      void qc.invalidateQueries({ queryKey: ['settings', 'general'] });
+      void qc.invalidateQueries({ queryKey: ['works'] });
+    },
     onError: (e) => toast.error(errorText(e, t)),
   });
   const genDry = useMutation({ mutationFn: () => api.post<any>('/generator/run?dryRun=true'), onError: (e) => toast.error(errorText(e, t)) });
@@ -323,7 +331,18 @@ function GeneralTab() {
         <CardHeader title={t('settings.general')} />
         <div className="flex items-end gap-3 p-4">
           <Field label={t('settings.dueTime')} hint={t('settings.dueTimeHint')}><Input type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
-          <Button disabled={!time || time === q.data?.taskDueTime} onClick={() => save.mutate()}>{t('common.save')}</Button>
+          <Button disabled={!time || time === q.data?.taskDueTime} onClick={() => save.mutate({ taskDueTime: time })}>{t('common.save')}</Button>
+        </div>
+        <div className="flex items-end gap-3 border-t p-4">
+          <Field label={t('settings.sharePercent')} hint={t('settings.sharePercentHint')}>
+            <Input inputMode="decimal" className="w-28" value={pct} onChange={(e) => setPct(e.target.value.replace(/[^\d.]/g, ''))} />
+          </Field>
+          <Button
+            disabled={pct === '' || Number(pct) > 100 || Number(pct) === q.data?.accountantSharePercent}
+            onClick={() => save.mutate({ accountantSharePercent: Number(pct) })}
+          >
+            {t('common.save')}
+          </Button>
         </div>
       </Card>
       <Card>

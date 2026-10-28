@@ -24,7 +24,7 @@ describe('vazifa generatori', () => {
     const qqs = await client('306234567', 'QQS');
     await gen('2026-10-01');
     expect(await reportCodes(aos, '2026-10-01')).toEqual(['JSHDS', 'TOLOV_MANBAI', 'AOS', 'INPS', 'PORUCHENYA_JSHDS']);
-    expect(await reportCodes(qqs, '2026-10-01')).toEqual(['JSHDS', 'TOLOV_MANBAI', 'QQS', 'INPS', 'PORUCHENYA_JSHDS', 'FOYDA']);
+    expect(await reportCodes(qqs, '2026-10-01')).toEqual(['JSHDS', 'TOLOV_MANBAI', 'QQS', 'FOYDA', 'INPS', 'PORUCHENYA_JSHDS']);
   });
 
   it('muddatlar: INPS 15.10, QQS 20.10, Poruchenya NULL (TODO)', async () => {
@@ -132,7 +132,7 @@ describe('vazifa generatori', () => {
     await pool.query(`UPDATE client SET tax_type = 'QQS' WHERE id = $1`, [c]);
     const r = await tx((db) => reconcileClient(db, c, team.leader, '2026-10-01'));
     expect(r.cancelled.map((t: any) => t.title)).toEqual(['AOS']);
-    expect(await reportCodes(c, '2026-10-01')).toEqual(['JSHDS', 'TOLOV_MANBAI', 'QQS', 'INPS', 'PORUCHENYA_JSHDS', 'FOYDA']);
+    expect(await reportCodes(c, '2026-10-01')).toEqual(['JSHDS', 'TOLOV_MANBAI', 'QQS', 'FOYDA', 'INPS', 'PORUCHENYA_JSHDS']);
     const jshds = await one(
       pool,
       `SELECT status FROM task WHERE client_id = $1 AND period = '2026-10-01' AND report_type_id = (SELECT id FROM report_type WHERE code = 'JSHDS')`,
