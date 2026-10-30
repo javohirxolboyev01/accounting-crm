@@ -3,6 +3,7 @@ import { Check, Pencil, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Popover } from '@/components/ui/popover';
 import { api } from '@/lib/api';
@@ -21,10 +22,12 @@ export function NoteCell({ clientId, clientName, note, className }: { clientId: 
   // Uzun matn bir qatorda "..." bilan kesiladi; to'liq matn faqat kesilganda hover'da chiqadi
   const textRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const save = useMutation({
     // Mavjud PATCH /clients/:id: buxgalterga ham `note` ruxsat, audit_log'ga yoziladi
     mutationFn: (value: string | null) => api.patch(`/clients/${clientId}`, { note: value }),
     onSuccess: (_d, value) => {
+      setConfirmDelete(false);
       setEditing(false);
       setDraft('');
       toast.success(value === null ? t('monthly.noteDeleted') : t('common.saved'));
@@ -37,7 +40,7 @@ export function NoteCell({ clientId, clientName, note, className }: { clientId: 
   const value = editing ? draft : open ? draft : note ?? '';
   const submit = () => {
     const v = draft.trim();
-    if (!v) return editing && note ? save.mutate(null) : undefined;
+    if (!v) return editing && note ? setConfirmDelete(true) : undefined;
     if (v === note) return setEditing(false);
     save.mutate(v);
   };
@@ -106,7 +109,7 @@ export function NoteCell({ clientId, clientName, note, className }: { clientId: 
         {note && (
           <button
             className={cn(iconBtn, 'text-gray-500 hover:bg-overdue-bg hover:text-overdue')}
-            onClick={() => save.mutate(null)}
+            onClick={() => setConfirmDelete(true)}
             disabled={save.isPending}
             title={t('common.delete')}
             aria-label={`${clientName} — ${t('common.delete')}`}
@@ -115,6 +118,14 @@ export function NoteCell({ clientId, clientName, note, className }: { clientId: 
           </button>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => save.mutate(null)}
+        loading={save.isPending}
+        title={`${clientName} — ${t('monthly.deleteNote')}`}
+        text={note}
+      />
     </td>
   );
 }

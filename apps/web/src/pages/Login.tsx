@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
 import { Button } from '@/components/ui/button';
-import { Field, Input } from '@/components/ui/input';
+import { Field, Input, PIN_MAX } from '@/components/ui/input';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import { errorText } from '@/lib/errors';
@@ -103,8 +103,12 @@ export default function Login() {
                       className="px-10"
                       type={showPw ? 'text' : 'password'}
                       autoComplete="current-password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={PIN_MAX}
                       value={form.password}
-                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      // Parol faqat raqamdan iborat: harf yozilmaydi
+                      onChange={(e) => setForm({ ...form, password: e.target.value.replace(/\D/g, '').slice(0, PIN_MAX) })}
                     />
                     <button
                       type="button"

@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { type Page, expect, test } from '@playwright/test';
 
-const PASSWORD = 'Parol123!';
+const PASSWORD = '123456';
 const SHOTS = process.env.E2E_SHOTS_DIR;
 
 async function login(page: Page, login: string) {

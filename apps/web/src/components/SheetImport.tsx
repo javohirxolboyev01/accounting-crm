@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, CheckCircle2, ChevronRight, ClipboardCheck, DatabaseZap, Download, Eye, ShieldCheck, Upload } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ClipboardCheck, DatabaseZap, Download, Eye, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -38,23 +38,25 @@ function ImportSteps({ step }: { step: 1 | 2 | 3 | 4 }) {
   const { t } = useTranslation();
   const steps = [t('sheets.step.choose'), t('sheets.step.preview'), t('sheets.step.apply')];
   return (
-    <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+    <ol className="grid grid-cols-3 gap-3">
       {steps.map((label, i) => {
         const n = i + 1;
         const done = step > n;
         const active = step === n;
         return (
-          <li key={label} className="flex items-center gap-2">
-            {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-gray-400" aria-hidden />}
-            <span
-              className={cn(
-                'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold',
-                done ? 'bg-green-600 text-on-brand' : active ? 'bg-brand-500 text-on-brand' : 'bg-gray-100 text-gray-500',
-              )}
-            >
-              {done ? <Check className="h-3 w-3" /> : n}
-            </span>
-            <span className={cn(active ? 'font-medium text-gray-900' : 'text-gray-500')}>{label}</span>
+          <li key={label} className="min-w-0 space-y-2" aria-current={active ? 'step' : undefined}>
+            <div className={cn('h-1 rounded-full transition-colors', done ? 'bg-green-600' : active ? 'bg-brand-500' : 'bg-gray-200')} />
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                className={cn(
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
+                  done ? 'bg-green-600 text-on-brand' : active ? 'bg-brand-500 text-on-brand' : 'bg-gray-100 text-gray-500',
+                )}
+              >
+                {done ? <Check className="h-3 w-3" /> : n}
+              </span>
+              <span className={cn('truncate', active ? 'font-medium text-gray-900' : 'text-gray-500')} title={label}>{label}</span>
+            </div>
           </li>
         );
       })}
@@ -142,35 +144,54 @@ function ImportDialog({ kind, open, onClose }: { kind: ImportKind; open: boolean
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} title={t(`sheets.importTitle.${kind}`)} className="max-w-4xl">
-        <div className="space-y-5 text-sm">
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title={t(`sheets.importTitle.${kind}`)}
+        className="max-w-4xl"
+        footer={
+          // Tugmalar doim pastda ko'rinadi (natija jadvali uzun bo'lsa ham). Tavsiya etilgan qadam asosiy rangda:
+          // tekshirilmagan bo'lsa "Tekshirish", tekshirilgandan keyin "CRM'ga yuklash".
+          <div className="flex w-full flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center">
+            <p className="flex min-w-0 flex-1 items-start gap-1.5 text-xs text-gray-500">
+              {previewed ? (
+                <><AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden /> {t('sheets.applyHint')}</>
+              ) : (
+                <><ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden /> {t('sheets.dryRunHint')}</>
+              )}
+            </p>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                variant={previewed ? 'outline' : 'default'}
+                className="flex-1 sm:flex-none"
+                disabled={!file || run.isPending}
+                loading={run.isPending && run.variables === true}
+                onClick={() => run.mutate(true)}
+              >
+                <Eye className="h-4 w-4" /> {t('sheets.dryRun')}
+              </Button>
+              <Button
+                variant={previewed ? 'default' : 'outline'}
+                className="flex-1 sm:flex-none"
+                disabled={!file || duplicate || run.isPending}
+                loading={run.isPending && run.variables === false}
+                onClick={apply}
+              >
+                <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-6 text-sm">
           <p className="text-gray-500">{t(`sheets.fileHintFor.${kind}`)}</p>
           <ImportSteps step={step} />
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-3">
             <div className="sm:col-span-2">
               <Field label={t('sheets.file')}><FileDrop file={file} onChange={(f) => { setFile(f); resetReport(); }} /></Field>
             </div>
             <Field label={t('sheets.period')} hint={t('sheets.periodHint')}><MonthPicker value={month} onChange={(v) => { setMonth(v); resetReport(); }} /></Field>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-gray-200 p-3">
-              <Button variant="outline" className="w-full" disabled={!file || run.isPending} loading={run.isPending && run.variables === true} onClick={() => run.mutate(true)}>
-                <Eye className="h-4 w-4" /> {t('sheets.dryRun')}
-              </Button>
-              <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-500">
-                <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden /> {t('sheets.dryRunHint')}
-              </p>
-            </div>
-            <div className="rounded-lg border border-gray-200 p-3">
-              <Button className="w-full" disabled={!file || duplicate || run.isPending} loading={run.isPending && run.variables === false} onClick={apply}>
-                <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
-              </Button>
-              <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-500">
-                <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden /> {t('sheets.applyHint')}
-              </p>
-            </div>
           </div>
 
           {report && s && (
@@ -191,9 +212,6 @@ function ImportDialog({ kind, open, onClose }: { kind: ImportKind; open: boolean
                       <div className="font-semibold text-gray-900">{t('sheets.dryRunResult')} · {report.period}</div>
                       <div className="text-xs text-gray-600">{t('sheets.dryRunNext')}</div>
                     </div>
-                    <Button disabled={run.isPending} loading={run.isPending && run.variables === false} onClick={() => run.mutate(false)}>
-                      <DatabaseZap className="h-4 w-4" /> {t('sheets.applyImport')}
-                    </Button>
                   </div>
                 )
               ) : (

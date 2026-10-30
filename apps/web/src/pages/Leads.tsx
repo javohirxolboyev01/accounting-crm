@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge, Card, CardHeader, PageHeader, Stat } from '@/components/ui/card';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog } from '@/components/ui/dialog';
-import { Field, Input, Textarea } from '@/components/ui/input';
+import { Field, Input, PhoneInput, Textarea } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { Empty, QueryState } from '@/components/ui/states';
 import { FormSkeleton, KpiSkeleton, TableSkeleton } from '@/components/ui/skeleton';
@@ -179,7 +179,7 @@ function LeadDialog({ id, onClose, onConvert }: { id: number | null; onClose: ()
                 <Input id="lead-director" value={contacts.director} disabled={converted} onChange={(e) => setContacts({ ...contacts, director: e.target.value })} />
               </Field>
               <Field label={t('leads.phone')} htmlFor="lead-phone" hint={t('leads.phoneHint')}>
-                <Input id="lead-phone" type="tel" value={contacts.phone} disabled={converted} placeholder="+998" onChange={(e) => setContacts({ ...contacts, phone: e.target.value })} />
+                <PhoneInput id="lead-phone" multiple value={contacts.phone} disabled={converted} onChange={(v) => setContacts({ ...contacts, phone: v })} />
               </Field>
               <div className="text-sm sm:col-span-2">
                 <div className="text-xs text-gray-500">{t('leads.address')}</div>

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
-import { Field, Input } from '@/components/ui/input';
+import { Field, Input, PIN_MIN, PinInput } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -76,10 +76,10 @@ export default function Profile() {
           }}
         >
           <Field label={t('profile.currentPassword')}><Input type="password" autoComplete="current-password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} /></Field>
-          <Field label={t('profile.newPassword')} hint={t('users.passwordHint')}><Input type="password" autoComplete="new-password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} /></Field>
-          <Field label={t('profile.repeatPassword')}><Input type="password" autoComplete="new-password" value={pw.repeat} onChange={(e) => setPw({ ...pw, repeat: e.target.value })} /></Field>
+          <Field label={t('profile.newPassword')} hint={t('users.passwordHint')}><PinInput value={pw.newPassword} onChange={(v) => setPw({ ...pw, newPassword: v })} /></Field>
+          <Field label={t('profile.repeatPassword')}><PinInput value={pw.repeat} onChange={(v) => setPw({ ...pw, repeat: v })} /></Field>
           <div className="sm:col-span-3">
-            <Button type="submit" disabled={!pw.currentPassword || pw.newPassword.length < 8 || changePw.isPending}>{t('common.save')}</Button>
+            <Button type="submit" disabled={!pw.currentPassword || pw.newPassword.length < PIN_MIN || changePw.isPending}>{t('common.save')}</Button>
           </div>
         </form>
       </Card>

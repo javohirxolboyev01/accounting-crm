@@ -19,6 +19,73 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
 );
 Textarea.displayName = 'Textarea';
 
+/** Parol: faqat raqam, 6–12 xona (server ham tekshiradi). Telefonda raqamli klaviatura ochiladi */
+export const PIN_MIN = 6;
+export const PIN_MAX = 12;
+export const PinInput = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: string; onChange: (pin: string) => void }>(
+  ({ value, onChange, className, ...p }, ref) => (
+    <input
+      ref={ref}
+      type="password"
+      inputMode="numeric"
+      autoComplete="new-password"
+      pattern="[0-9]*"
+      maxLength={PIN_MAX}
+      className={cn(base, 'h-10 tracking-[0.3em]', className)}
+      value={value}
+      onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, PIN_MAX))}
+      {...p}
+    />
+  ),
+);
+PinInput.displayName = 'PinInput';
+
+/**
+ * O'zbekiston raqami: +998 90 123 45 67. '+998' bilan yoki 9 xonali yozilsa/qo'yilsa (paste) shu ko'rinishga keltiriladi.
+ * Boshqa davlat raqami (+7…) o'zgartirilmaydi, faqat raqam va '+' qoladi.
+ */
+function formatPhone(part: string): string {
+  const s = part.trim();
+  let d = s.replace(/\D/g, '');
+  if (!d) return '';
+  if (s.startsWith('+') || d.length > 9) {
+    if (!d.startsWith('998')) return `+${d}`;
+    d = d.slice(3);
+  }
+  d = d.slice(0, 9);
+  if (!d) return '';
+  const g = [d.slice(0, 2), d.slice(2, 5), d.slice(5, 7), d.slice(7, 9)].filter(Boolean);
+  return `+998 ${g.join(' ')}`;
+}
+/** multiple: bir nechta raqam vergul bilan (operator bazasi) */
+export const formatPhones = (v: string, multiple = false) =>
+  multiple ? v.split(',').map(formatPhone).join(', ') : formatPhone(v);
+
+export function PhoneInput({
+  value,
+  onChange,
+  multiple = false,
+  ...p
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> & { value: string; onChange: (v: string) => void; multiple?: boolean }) {
+  const shown = formatPhones(value, multiple);
+  return (
+    <Input
+      type="tel"
+      inputMode="tel"
+      autoComplete="off"
+      placeholder="+998 90 123 45 67"
+      {...p}
+      value={shown}
+      onChange={(e) => {
+        let raw = e.target.value;
+        // Backspace faqat bo'shliq/vergulni o'chirgan bo'lsa natija o'zgarmay qolardi: oxirgi ajratkich ham olinadi
+        if (raw.length < shown.length && formatPhones(raw, multiple) === shown) raw = raw.replace(/\D+$/, '');
+        onChange(formatPhones(raw, multiple));
+      }}
+    />
+  );
+}
+
 /** Butun son xonalarga ajratiladi (1,500,000 — jadvaldagi fmtMoney bilan bir xil); holatda faqat raqamlar turadi */
 const groupDigits = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 

@@ -10,7 +10,7 @@ import type { ClientStatus, Lead, TaxType } from '@/lib/types';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
 import { DatePicker } from './ui/date-picker';
-import { Field, Input, Textarea } from './ui/input';
+import { Field, Input, PhoneInput, Textarea } from './ui/input';
 import { Select } from './ui/select';
 
 const empty = { stir: '', name: '', contactPerson: '', phone: '', taxType: 'AOS' as TaxType, taxTypeEffectiveFrom: '', accountantId: '', status: 'ACTIVE' as ClientStatus, note: '' };
@@ -78,7 +78,7 @@ export function NewClientDialog({ open, onClose, lead }: { open: boolean; onClos
         <Field label={t('clients.stir')} htmlFor="nc-stir"><Input id="nc-stir" required inputMode="numeric" value={form.stir} onChange={(e) => set({ stir: e.target.value })} /></Field>
         <Field label={t('clients.name')} htmlFor="nc-name"><Input id="nc-name" required value={form.name} onChange={(e) => set({ name: e.target.value })} /></Field>
         <Field label={t('clients.contact')} htmlFor="nc-contact"><Input id="nc-contact" value={form.contactPerson} onChange={(e) => set({ contactPerson: e.target.value })} /></Field>
-        <Field label={t('clients.phone')} htmlFor="nc-phone" hint={t('clients.phoneHint')}><Input id="nc-phone" type="tel" value={form.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
+        <Field label={t('clients.phone')} htmlFor="nc-phone" hint={t('clients.phoneHint')}><PhoneInput id="nc-phone" value={form.phone} onChange={(v) => set({ phone: v })} /></Field>
         <Field label={t('clients.taxType')} htmlFor="nc-tax">
           <Select id="nc-tax" value={form.taxType} onChange={(v) => set({ taxType: v as TaxType })} options={[{ value: 'AOS', label: 'AOS' }, { value: 'QQS', label: 'QQS' }]} />
         </Field>

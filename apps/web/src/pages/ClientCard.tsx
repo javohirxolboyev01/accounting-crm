@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Field, Input, NumberInput, Textarea } from '@/components/ui/input';
+import { Field, Input, NumberInput, PhoneInput, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
 import { FormSkeleton, ListSkeleton } from '@/components/ui/skeleton';
@@ -174,7 +174,7 @@ export default function ClientCard() {
           <Field label={t('clients.stir')} htmlFor="stir"><Input id="stir" required inputMode="numeric" value={form.stir} disabled={ro} onChange={(e) => set({ stir: e.target.value })} /></Field>
           <Field label={t('clients.name')} htmlFor="name"><Input id="name" required value={form.name} disabled={ro} onChange={(e) => set({ name: e.target.value })} /></Field>
           <Field label={t('clients.contact')} htmlFor="contact"><Input id="contact" value={form.contactPerson} onChange={(e) => set({ contactPerson: e.target.value })} /></Field>
-          <Field label={t('clients.phone')} htmlFor="phone" hint={t('clients.phoneHint')}><Input id="phone" type="tel" value={form.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
+          <Field label={t('clients.phone')} htmlFor="phone" hint={t('clients.phoneHint')}><PhoneInput id="phone" value={form.phone} onChange={(v) => set({ phone: v })} /></Field>
           <Field label={t('clients.taxType')} htmlFor="tax" hint={ro ? t('clients.taxLeaderOnly') : undefined}>
             <Select id="tax" value={form.taxType} disabled={ro} onChange={(v) => set({ taxType: v as TaxType })} options={[{ value: 'AOS', label: 'AOS' }, { value: 'QQS', label: 'QQS' }]} />
           </Field>

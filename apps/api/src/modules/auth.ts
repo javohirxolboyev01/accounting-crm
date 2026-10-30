@@ -17,7 +17,9 @@ const LOCK_MINUTES = 15;
 const RT_COOKIE = 'bux_rt';
 
 export const hashPassword = (p: string) => bcrypt.hash(p, 12);
-export const passwordSchema = z.string().min(8, 'Parol kamida 8 belgi').max(200);
+// Rahbar qarori: parol — faqat raqam (6–12 xona, masalan 135792468). Taxmin qilishdan 5 marta xato -> 15 daqiqalik bloklash himoya qiladi.
+// Kirish sahifasi ham faqat raqam qabul qiladi: harfli eski parol bo'lsa rahbar uni Xodimlar sahifasidan tiklaydi.
+export const passwordSchema = z.string().regex(/^\d{6,12}$/, 'Parol 6–12 ta raqamdan iborat bo\'lishi kerak');
 
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 

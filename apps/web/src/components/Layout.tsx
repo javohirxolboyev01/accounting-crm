@@ -3,7 +3,6 @@ import {
   AlignJustify,
   Bell,
   Building2,
-  CalendarCheck,
   CircleUserRound,
   History,
   LayoutDashboard,
@@ -118,9 +117,8 @@ export function Layout() {
   // staff — buxgalteriya bo'limlari (operatorga yo'q); operator faqat "Yangi mijozlar"ni ko'radi
   const nav = [
     { to: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, leader: true },
-    isLeader
-      ? { to: '/my-day', label: t('nav.myDay'), icon: CalendarCheck, staff: true }
-      : { to: '/my-day', label: t('nav.home'), icon: LayoutDashboard, staff: true },
+    // Rahbarga "Mening kunim" hozircha kerak emas (sahifa o'zi ochiladi, faqat menyuda yo'q)
+    ...(isLeader ? [] : [{ to: '/my-day', label: t('nav.home'), icon: LayoutDashboard, staff: true }]),
     { to: '/clients', label: t(isLeader ? 'nav.clientsLeader' : 'nav.clients'), icon: Building2, staff: true },
     { to: '/monthly', label: t('nav.monthly'), icon: Sheet, staff: true },
     ...(isLeader || isOperator ? [{ to: '/leads', label: t('nav.leads'), icon: PhoneCall }] : []),

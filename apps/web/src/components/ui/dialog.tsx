@@ -1,7 +1,9 @@
 import { X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
+import { Button } from './button';
 
 function CloseButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
@@ -66,6 +68,46 @@ export function Dialog({
         {footer && <div className="mt-6 flex justify-end gap-3">{footer}</div>}
       </div>
     </div>
+  );
+}
+
+/**
+ * O'chirishdan oldin tasdiqlash oynasi. Body'ga portal qilinadi: jadval katagi, sticky header yoki
+ * Drawer ichidan ochilsa ham hammasining ustida turadi.
+ */
+export function ConfirmDialog({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  text,
+  confirmLabel,
+  loading,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title?: ReactNode;
+  text?: ReactNode;
+  confirmLabel?: ReactNode;
+  loading?: boolean;
+}) {
+  const { t } = useTranslation();
+  return createPortal(
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={title ?? t('common.deleteTitle')}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="danger" loading={loading} onClick={onConfirm}>{confirmLabel ?? t('common.delete')}</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-gray-600">{text ?? t('common.deleteText')}</p>
+    </Dialog>,
+    document.body,
   );
 }
 

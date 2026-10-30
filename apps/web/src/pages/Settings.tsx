@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
-import { Dialog } from '@/components/ui/dialog';
+import { ConfirmDialog, Dialog } from '@/components/ui/dialog';
 import { Checkbox, Field, Input } from '@/components/ui/input';
 import { Empty, QueryState } from '@/components/ui/states';
 import { TableSkeleton } from '@/components/ui/skeleton';
@@ -286,7 +286,8 @@ function TemplatesTab() {
   const onErr = (e: unknown) => toast.error(errorText(e, t));
   const add = useMutation({ mutationFn: () => api.post('/settings/urgent-templates', { text }), onSuccess: () => { setText(''); void refresh(); }, onError: onErr });
   const upd = useMutation({ mutationFn: (p: { id: string; text: string }) => api.patch(`/settings/urgent-templates/${p.id}`, { text: p.text }), onSuccess: () => { toast.success(t('common.saved')); void refresh(); }, onError: onErr });
-  const del = useMutation({ mutationFn: (id: string) => api.del(`/settings/urgent-templates/${id}`), onSuccess: refresh, onError: onErr });
+  const [removing, setRemoving] = useState<UrgentTemplate | null>(null);
+  const del = useMutation({ mutationFn: (id: string) => api.del(`/settings/urgent-templates/${id}`), onSuccess: () => { setRemoving(null); void refresh(); }, onError: onErr });
   return (
     <Card>
       <CardHeader title={t('settings.templates')} />
@@ -297,7 +298,7 @@ function TemplatesTab() {
             <li key={tpl.id} className="flex items-center gap-2 px-4 py-2">
               <Input value={edit[tpl.id] ?? tpl.text} onChange={(e) => setEdit({ ...edit, [tpl.id]: e.target.value })} aria-label={t('settings.templateText')} />
               <Button size="sm" variant="outline" disabled={(edit[tpl.id] ?? tpl.text) === tpl.text} onClick={() => upd.mutate({ id: tpl.id, text: edit[tpl.id] })}>{t('common.save')}</Button>
-              <Button size="icon" variant="ghost" onClick={() => del.mutate(tpl.id)} aria-label={t('common.delete')}><Trash2 className="h-4 w-4 text-red-600" /></Button>
+              <Button size="icon" variant="ghost" onClick={() => setRemoving(tpl)} aria-label={t('common.delete')}><Trash2 className="h-4 w-4 text-red-600" /></Button>
             </li>
           ))}
         </ul>
@@ -306,6 +307,13 @@ function TemplatesTab() {
           <Button type="submit" disabled={!text.trim()}><Plus className="h-4 w-4" /> {t('common.add')}</Button>
         </form>
       </QueryState>
+      <ConfirmDialog
+        open={!!removing}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => removing && del.mutate(removing.id)}
+        loading={del.isPending}
+        text={removing?.text}
+      />
     </Card>
   );
 }

@@ -50,6 +50,40 @@ describe('auth', () => {
     expect((await L.get('/api/users')).status).toBe(200);
     expect((await request(app).get('/api/users')).status).toBe(401);
   });
+
+  it('yangi parol faqat 6–12 ta raqam', async () => {
+    const base = { fullName: 'Pin Test', role: 'ACCOUNTANT' };
+    for (const password of ['12345', '1234567890123', 'abc123', '12 456', 'Parol123!']) {
+      expect((await L.post('/api/users', { ...base, login: 'pintest', password })).status).toBe(400);
+    }
+    const r = await L.post('/api/users', { ...base, login: 'pintest', password: '135792468' });
+    expect(r.status).toBe(201);
+    expect((await request(app).post('/api/auth/login').send({ login: 'pintest', password: '135792468' })).status).toBe(200);
+    expect((await L.post(`/api/users/${r.body.id}/reset-password`, { password: 'abcdef' })).status).toBe(400);
+    await L.patch(`/api/users/${r.body.id}`, { active: false });
+  });
+
+  it('rahbar tarixsiz xodimni o\'chiradi; tarixi bor xodim va o\'zi o\'chirilmaydi', async () => {
+    const fresh = await createUser('fresh', 'ACCOUNTANT');
+    await token('fresh'); // refresh_token yozuvi o'chirishga xalaqit bermaydi
+    expect((await A1.del(`/api/users/${fresh}`)).status).toBe(403);
+    expect((await L.del(`/api/users/${fresh}`)).status).toBe(200);
+    expect(await one(pool, 'SELECT id FROM app_user WHERE id = $1', [fresh])).toBeFalsy();
+    expect(await one(pool, `SELECT id FROM audit_log WHERE entity = 'app_user' AND entity_id = $1 AND action = 'DELETE'`, [fresh])).toBeTruthy();
+
+    // Rahbar audit_log'da actor: o'chirilmaydi
+    const other = await createUser('leader2', 'LEADER');
+    const L2 = api(await token('leader2'));
+    await L2.patch(`/api/users/${team.acc2}`, { fullName: 'Bobur Aliyev' });
+    const r = await L.del(`/api/users/${other}`);
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('USER_HAS_HISTORY');
+    expect(await one(pool, 'SELECT id FROM app_user WHERE id = $1', [other])).toBeTruthy();
+    await L.patch(`/api/users/${other}`, { active: false }); // keyingi testlar bildirishnomasiga aralashmasin
+
+    expect((await L.del(`/api/users/${team.leader}`)).body.code).toBe('SELF_DELETE');
+    expect((await L.del('/api/users/999999')).status).toBe(404);
+  });
 });
 
 describe('mijozlar', () => {

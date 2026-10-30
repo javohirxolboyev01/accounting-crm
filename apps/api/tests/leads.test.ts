@@ -58,7 +58,7 @@ describe('operator ruxsatlari (serverda)', () => {
   });
 
   it('rahbar operator xodim yaratadi', async () => {
-    const r = await L.post('/api/users', { fullName: 'Operator 2', login: 'op2', password: 'Parol123!', role: 'OPERATOR' });
+    const r = await L.post('/api/users', { fullName: 'Operator 2', login: 'op2', password: '123456', role: 'OPERATOR' });
     expect(r.status).toBe(201);
     expect(r.body.role).toBe('OPERATOR');
   });

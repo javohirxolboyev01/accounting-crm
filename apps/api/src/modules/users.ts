@@ -90,6 +90,32 @@ usersRouter.patch('/:id', async (req, res) => {
   res.json(user);
 });
 
+// Butunlay o'chirish faqat ish tarixi yo'q xodim uchun (masalan xato yaratilgan).
+// Tarix bo'lsa (vazifa, audit_log, qo'ng'iroq, taymer, biriktirilgan mijoz) FK o'chirishga yo'l qo'ymaydi:
+// audit_log o'zgarmas, shuning uchun bunday xodim faqat faolsizlantiriladi.
+usersRouter.delete('/:id', async (req, res) => {
+  const actor = me(req);
+  const id = parse(z.coerce.number().int(), req.params.id);
+  if (id === actor.id) throw new AppError(400, 'SELF_DELETE', 'O\'zingizni o\'chira olmaysiz');
+  try {
+    await tx(async (db) => {
+      const before = await one(db, `SELECT ${USER} FROM app_user WHERE id = $1 FOR UPDATE`, [id]);
+      if (!before) throw notFound('Foydalanuvchi');
+      // Xodimning shaxsiy (tarix bo'lmagan) yozuvlari u bilan birga ketadi
+      await db.query('DELETE FROM refresh_token WHERE user_id = $1', [id]);
+      await db.query('DELETE FROM notification WHERE user_id = $1', [id]);
+      await db.query('DELETE FROM app_user WHERE id = $1', [id]);
+      await audit(db, { actorId: actor.id, entity: 'app_user', entityId: id, action: 'DELETE', before });
+    });
+  } catch (e) {
+    if ((e as { code?: string }).code === '23503') {
+      throw new AppError(409, 'USER_HAS_HISTORY', 'Xodimning ish tarixi bor: o\'chirib bo\'lmaydi, faolsizlantiring');
+    }
+    throw e;
+  }
+  res.json({ ok: true });
+});
+
 usersRouter.post('/:id/reset-password', async (req, res) => {
   const actor = me(req);
   const id = parse(z.coerce.number().int(), req.params.id);

@@ -17,7 +17,7 @@ export async function seedE2e() {
     return;
   }
   await tx(async (db) => {
-    const pw = await hashPassword('Parol123!');
+    const pw = await hashPassword('123456');
     const user = async (login: string, fullName: string, role: string) =>
       (
         await one(

@@ -12,7 +12,7 @@ import type { TaskDetail, TaskStatus } from '@/lib/types';
 import { invalidateTasks, taskTitle, taskTone, useChangeStatus } from '@/hooks/tasks';
 import { TaskStatusBadge } from './StatusBadge';
 import { Button } from './ui/button';
-import { Drawer } from './ui/dialog';
+import { ConfirmDialog, Drawer } from './ui/dialog';
 import { Input, Textarea } from './ui/input';
 import { QueryState } from './ui/states';
 
@@ -62,7 +62,8 @@ export function TaskPanel({ taskId, onClose }: { taskId: number | null; onClose:
   const saveNote = useMutation({ mutationFn: () => api.patch(`/tasks/${taskId}`, { note }), onSuccess: () => { refresh(); toast.success(t('common.saved')); }, onError: onErr });
   const addItem = useMutation({ mutationFn: () => api.post(`/tasks/${taskId}/checklist`, { text: item }), onSuccess: () => { setItem(''); refresh(); }, onError: onErr });
   const toggle = useMutation({ mutationFn: (p: { id: number; done: boolean }) => api.patch(`/tasks/${taskId}/checklist/${p.id}`, { done: p.done }), onSuccess: refresh, onError: onErr });
-  const remove = useMutation({ mutationFn: (id: number) => api.del(`/tasks/${taskId}/checklist/${id}`), onSuccess: refresh, onError: onErr });
+  const [removing, setRemoving] = useState<{ id: number; text: string } | null>(null);
+  const remove = useMutation({ mutationFn: (id: number) => api.del(`/tasks/${taskId}/checklist/${id}`), onSuccess: () => { setRemoving(null); refresh(); }, onError: onErr });
 
   const tone = task ? taskTone(task) : null;
   return (
@@ -128,7 +129,7 @@ export function TaskPanel({ taskId, onClose }: { taskId: number | null; onClose:
                   <li key={c.id} className="group flex items-center gap-2">
                     <input type="checkbox" className="h-3.5 w-3.5 accent-brand-500" checked={c.done} onChange={(e) => toggle.mutate({ id: c.id, done: e.target.checked })} aria-label={c.text} />
                     <span className={c.done ? 'text-gray-400 line-through' : ''}>{c.text}</span>
-                    <button className="ml-auto opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={() => remove.mutate(c.id)} aria-label={t('common.delete')}>
+                    <button className="ml-auto opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={() => setRemoving(c)} aria-label={t('common.delete')}>
                       <Trash2 className="h-3.5 w-3.5 text-gray-400 hover:text-red-600" />
                     </button>
                   </li>
@@ -167,6 +168,13 @@ export function TaskPanel({ taskId, onClose }: { taskId: number | null; onClose:
           </div>
         )}
       </QueryState>
+      <ConfirmDialog
+        open={!!removing}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => removing && remove.mutate(removing.id)}
+        loading={remove.isPending}
+        text={removing?.text}
+      />
     </Drawer>
   );
 }
