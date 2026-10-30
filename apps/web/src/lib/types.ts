@@ -68,7 +68,8 @@ export interface Client {
 
 export interface ClientCard extends Client {
   taxHistory: { id: number; taxType: TaxType; effectiveFrom: string; createdAt: string; createdByName: string | null }[];
-  dividendMonths: string[];
+  /** Holat bo'yicha hisobotlar (dividend, norezident): belgilangan holat oylari 'YYYY-MM' */
+  events: { reportTypeId: number; code: string; name: string; nameRu: string; dueDay: number | null; applicable: boolean; months: string[] }[];
   reportExclusions: { reportTypeId: number; code: string; name: string; nameRu: string; effectiveFrom: string }[];
 }
 
@@ -220,7 +221,7 @@ export interface ReportType {
   appliesToAos: boolean;
   appliesToQqs: boolean;
   createsAccountantTask: boolean;
-  requiresDividendFlag: boolean;
+  requiresEventFlag: boolean;
   sheetAliases: string[];
   active: boolean;
   sortOrder: number;

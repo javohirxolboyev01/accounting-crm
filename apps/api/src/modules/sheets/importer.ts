@@ -1,7 +1,7 @@
 import { audit } from '../../common/audit';
 import { AppError } from '../../common/errors';
 import { normalizeName, normalizeStir, normalizeTaxType } from '../../common/normalize';
-import { currentPeriod } from '../../common/time';
+import { addMonthsIso, currentPeriod } from '../../common/time';
 import { type Db, one, q } from '../../db';
 import { createClient, recordTaxType } from '../clients';
 import { reconcileClient } from '../generator';
@@ -60,6 +60,9 @@ export async function importTable(
   const period = opts.period ?? map.period ?? currentPeriod();
   const results: ImportRowResult[] = [];
   let cellsDone = 0;
+  const eventTypes = new Set(
+    (await q<{ id: number }>(db, 'SELECT id FROM report_type WHERE requires_event_flag')).map((r) => Number(r.id)),
+  );
 
   for (let r = map.headerRow + 1; r < rows.length; r++) {
     const row = rows[r] ?? [];
@@ -171,11 +174,34 @@ export async function importTable(
     const excluded = new Set(
       (await q<{ id: number }>(db, 'SELECT report_type_id AS id FROM client_report_exclusion WHERE client_id = $1', [clientId])).map((e) => Number(e.id)),
     );
+    // Holat bo'yicha hisobot (dividend, norezident; V20): katakda 0/1 = holat bo'lgan -> o'tgan oy (holat oyi) belgisi
+    // qo'yiladi; X = holat yo'q -> belgi olinadi. Bunday ustundagi X doimiy "topshirmaydi" belgisi emas.
+    const eventMonth = addMonthsIso(period, -1).slice(0, 7);
+    const events = new Set(
+      (await q<{ id: number }>(db, 'SELECT report_type_id AS id FROM client_report_event WHERE client_id = $1 AND month = $2', [clientId, eventMonth])).map((e) => Number(e.id)),
+    );
     let exclusionsChanged = false;
     for (const col of map.reports) {
       const v = parseCell(row[col.col]);
       const cell = cells.find((c) => c.reportTypeId === col.reportTypeId);
       if (!cell || v === null || v === '') continue;
+      if (eventTypes.has(col.reportTypeId)) {
+        if (v !== 'X' && !events.has(col.reportTypeId)) {
+          await db.query(
+            `INSERT INTO client_report_event (client_id, report_type_id, month, marked_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+            [clientId, col.reportTypeId, eventMonth, opts.actorId],
+          );
+          await audit(db, { actorId: opts.actorId, entity: 'client', entityId: clientId, clientId, action: 'EVENT_MARK', after: { report: col.code, month: eventMonth, source: 'IMPORT' } });
+          res.changes.push(`${col.code}:${eventMonth}`);
+          exclusionsChanged = true;
+        } else if (v === 'X' && events.has(col.reportTypeId)) {
+          await db.query('DELETE FROM client_report_event WHERE client_id = $1 AND report_type_id = $2 AND month = $3', [clientId, col.reportTypeId, eventMonth]);
+          await audit(db, { actorId: opts.actorId, entity: 'client', entityId: clientId, clientId, action: 'EVENT_UNMARK', before: { report: col.code, month: eventMonth }, after: { source: 'IMPORT' } });
+          res.changes.push(`${col.code}:X`);
+          exclusionsChanged = true;
+        }
+        continue;
+      }
       if (v === 'X' && cell.applicable) {
         await db.query(
           `INSERT INTO client_report_exclusion (client_id, report_type_id, effective_from, created_by) VALUES ($1, $2, $3, $4)

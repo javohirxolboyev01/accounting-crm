@@ -5,14 +5,16 @@ import { me, requireAuth, requireLeader } from '../common/auth';
 import { audit, diff } from '../common/audit';
 import { AppError, notFound, parse } from '../common/errors';
 import { type Db, one, pool, q, tx } from '../db';
+import { currentPeriod } from '../common/time';
 import { sharePercent } from './clients';
+import { getDueTime } from './generator';
 
-// Sozlamalar: hamma o'qiydi, faqat rahbar yozadi. O'zgarishlar mavjud vazifalarga tegmaydi
-// (keyingi generatsiyadan kuchga kiradi).
+// Sozlamalar: hamma o'qiydi, faqat rahbar yozadi. O'zgarishlar keyingi generatsiyadan kuchga kiradi;
+// istisno — hisobot muddat kuni: joriy va keyingi davrlarning ochiq vazifalari ham yangi muddatga o'tadi.
 
 const REPORT = `id, code, name, name_ru AS "nameRu", frequency, due_day AS "dueDay", generation_months AS "generationMonths",
   applies_to_aos AS "appliesToAos", applies_to_qqs AS "appliesToQqs", creates_accountant_task AS "createsAccountantTask",
-  requires_dividend_flag AS "requiresDividendFlag", sheet_aliases AS "sheetAliases", active, sort_order AS "sortOrder"`;
+  requires_event_flag AS "requiresEventFlag", sheet_aliases AS "sheetAliases", active, sort_order AS "sortOrder"`;
 const ROUTINE = `id, name, name_ru AS "nameRu", sort_order AS "sortOrder", active, report_type_id AS "reportTypeId",
   is_free_text AS "isFreeText", effective_from AS "effectiveFrom"`;
 
@@ -38,7 +40,7 @@ settingsRouter.patch('/report-types/:id', requireLeader, async (req, res) => {
       appliesToAos: z.boolean().optional(),
       appliesToQqs: z.boolean().optional(),
       createsAccountantTask: z.boolean().optional(),
-      requiresDividendFlag: z.boolean().optional(),
+      requiresEventFlag: z.boolean().optional(),
       sheetAliases: z.array(z.string().trim().min(2).max(50)).optional(),
       active: z.boolean().optional(),
       sortOrder: z.number().int().optional(),
@@ -56,7 +58,7 @@ settingsRouter.patch('/report-types/:id', requireLeader, async (req, res) => {
          generation_months = CASE WHEN $6 THEN $7::int[] ELSE generation_months END,
          applies_to_aos = coalesce($8, applies_to_aos), applies_to_qqs = coalesce($9, applies_to_qqs),
          creates_accountant_task = coalesce($10, creates_accountant_task),
-         requires_dividend_flag = coalesce($11, requires_dividend_flag),
+         requires_event_flag = coalesce($11, requires_event_flag),
          sheet_aliases = coalesce($12, sheet_aliases),
          active = coalesce($13, active), sort_order = coalesce($14, sort_order)
        WHERE id = $1 RETURNING ${REPORT}`,
@@ -71,14 +73,30 @@ settingsRouter.patch('/report-types/:id', requireLeader, async (req, res) => {
         body.appliesToAos ?? null,
         body.appliesToQqs ?? null,
         body.createsAccountantTask ?? null,
-        body.requiresDividendFlag ?? null,
+        body.requiresEventFlag ?? null,
         body.sheetAliases ? body.sheetAliases.map((a) => a.toUpperCase()) : null,
         body.active ?? null,
         body.sortOrder ?? null,
       ],
     );
     const d = diff(before, body);
-    if (d.changed) await audit(db, { actorId: u.id, entity: 'report_type', entityId: id, action: 'UPDATE', before: d.before, after: d.after });
+    // Muddat kuni bitta joyda: o'zgarsa ochiq vazifalar (joriy oydan) ham yangi muddatga o'tadi — jadval, karta,
+    // vazifa ranglari bir xil sanani ko'rsatsin. O'tgan davrlar va bajarilganlari tegilmaydi.
+    // Yangi muddat allaqachon o'tgan bo'lsa "muddat o'tdi" xabari qayta yuborilmaydi; keyinga surilsa yana yuboriladi.
+    let retimed = 0;
+    if (body.dueDay !== undefined && body.dueDay !== before.dueDay) {
+      const moved = await db.query(
+        `UPDATE task SET due_at = fn_due_at(period, $2, $4),
+                overdue_notified_at = CASE WHEN fn_due_at(period, $2, $4) < now() THEN coalesce(overdue_notified_at, now()) END
+         WHERE kind = 'REPORT' AND report_type_id = $1 AND period >= $3
+           AND status IN ('TODO', 'IN_PROGRESS', 'WAITING_CLIENT')`,
+        [id, body.dueDay, currentPeriod(), await getDueTime(db)],
+      );
+      retimed = moved.rowCount ?? 0;
+    }
+    if (d.changed) {
+      await audit(db, { actorId: u.id, entity: 'report_type', entityId: id, action: 'UPDATE', before: d.before, after: retimed ? { ...d.after, tasksRetimed: retimed } : d.after });
+    }
     return r;
   });
   res.json(row);

@@ -90,7 +90,9 @@ Mas'ul shaxs telefoni faqat aloqa ma'lumoti (mijozga avtomatik xabar **yuborilma
 | INPS | oylik | hisobot oyidan keyingi oyning 15-kuni | ha | ha |
 | Poruchenya JShDS (to'lov topshiriqnomasi) | oylik, hamma mijoz | `TODO(tasdiqlash)`: muddat kuni | ha | ha |
 | Foyda solig'i | oylik | 20-sana | yo'q | ha |
-| Dividend hisoboti | oylik, faqat dividend to'langan oyda | shu oyning 20-kuni (sozlamadan) | ha | ha |
+| Dividend hisoboti | holat bo'yicha: dividend to'langan oydan keyingi oyda | 20-sana (sozlamadan) | ha | ha |
+| Norezident foyda (norezident daromadidan to'lov manbaida ushlanadigan foyda solig'i) | holat bo'yicha: norezidentga daromad to'langan oydan keyingi oyda | 20-sana | yo'q | ha |
+| Norezident QQS (chet ellik shaxslardan olingan tovar/xizmat bo'yicha QQS) | holat bo'yicha: chet eldan tovar/xizmat olingan oydan keyingi oyda | 20-sana | yo'q | ha |
 | Moliyaviy natijalar | oylik | 15-sana | ha | ha |
 | Buxgalteriya balansi | oylik | 15-sana | ha | ha |
 | Statistika hisoboti | oylik | 15-sana | ha | ha |
@@ -116,7 +118,7 @@ Korxonalar 2 sinfga bo'linadi: **QQS to'lovchi** va **AOS to'lovchi**. QQS to'lo
 
 - Generatsiya har oyning 1-kuni; muddat shu oy ichida (Oktyabrda INPS = 15.10, dividend = 20.10).
 - Muddat kunlari va "qaysi soliq turiga qaysi hisobot" qoidasi **ma'lumot sifatida** (`report_type`), kodga qotirilmaydi. Qonun o'zgarsa rahbar sozlamadan tuzatadi.
-- Dividend: mijoz kartasida "shu oyda dividend to'langan" belgisi bo'lsa vazifa shu oyda chiqadi (faqat joriy oy belgilanadi) (`TODO(tasdiqlash)`: kim belgilaydi — taxmin: buxgalter yoki rahbar).
+- Holat bo'yicha hisobotlar (`report_type.requires_event_flag`: Dividend, Norezident foyda, Norezident QQS): mijoz kartasida har biri uchun alohida belgi — holat bo'lgan oy (`client_report_event`, faqat joriy yoki o'tgan oy). Hisobot **keyingi** oyda chiqadi ("hisobot oyidan keyingi oyning 20 kunigacha"). Kartada esa **topshirish oyi** ko'rsatiladi ("Oktyabr · 20.10 gacha" = sentabr holati): sahifa va Excel ham topshirish oyi bo'yicha. Belgini rahbar ham, buxgalter ham qo'yadi. Importda shu ustunda 0/1 = holat bo'lgan (belgi qo'yiladi), X = holat yo'q.
 - Soliq turi o'zgarsa (`effective_from`), hisobotlar ro'yxati shu sanadan almashadi; o'tgan davrlar o'zgarmaydi.
 
 ### 6.4 Vazifa holatlari
@@ -195,6 +197,5 @@ Haqiqiy jadval ustunlari:
 ## 10. Hali ochiq masalalar (`TODO(tasdiqlash)`)
 
 1. Poruchenya JShDS muddat kuni.
-2. Dividend belgisini kim qo'yadi.
-3. "Qolgan hisobotlarni o'zimiz topshiramiz": hozircha faqat INPS buxgalterga vazifa (`creates_accountant_task`), qolganlari oylik jadvalda ko'rinadi. Tasdiqlansa bayroq o'zgartiriladi.
-4. JShDS/To'lov manbai/AOS/QQS muddati oy: jadvaldagi sarlavha (15.10, 20.10) bo'yicha joriy oyda deb olingan.
+2. "Qolgan hisobotlarni o'zimiz topshiramiz": hozircha faqat INPS buxgalterga vazifa (`creates_accountant_task`), qolganlari oylik jadvalda ko'rinadi. Tasdiqlansa bayroq o'zgartiriladi.
+3. JShDS/To'lov manbai/AOS/QQS muddati oy: jadvaldagi sarlavha (15.10, 20.10) bo'yicha joriy oyda deb olingan.

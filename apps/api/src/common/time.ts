@@ -19,6 +19,11 @@ export function periodFromMonth(month: string | undefined): string {
   return `${month}-01`;
 }
 
+/** 'YYYY-MM-01' + n oy */
+export function addMonthsIso(period: string, n: number): string {
+  return DateTime.fromISO(period).plus({ months: n }).toISODate()!;
+}
+
 export function monthOf(period: string): string {
   return period.slice(0, 7);
 }

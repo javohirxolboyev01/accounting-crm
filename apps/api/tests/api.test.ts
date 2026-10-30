@@ -116,6 +116,25 @@ describe('sozlamalar', () => {
     expect((await A1.patch('/api/settings/report-types/1', { dueDay: 10 })).status).toBe(403);
     expect((await A1.get('/api/settings/report-types')).status).toBe(200);
   });
+
+  it('muddat kuni o\'zgarsa joriy oyning ochiq vazifalari ko\'chadi, bajarilgani tegilmaydi', async () => {
+    const tasks = await q(
+      pool,
+      `SELECT t.id FROM task t JOIN report_type rt ON rt.id = t.report_type_id
+       WHERE rt.code = 'JSHDS' AND t.status = 'TODO' ORDER BY t.id LIMIT 2`,
+    );
+    expect(tasks.length).toBe(2);
+    await pool.query(`UPDATE task SET status = 'DONE', done_at = now() WHERE id = $1`, [tasks[1].id]);
+    const due = async (id: number) =>
+      (await one(pool, `SELECT to_char(due_at AT TIME ZONE 'Asia/Tashkent', 'DD') AS d FROM task WHERE id = $1`, [id])).d;
+    const doneBefore = await due(tasks[1].id);
+    expect((await L.patch('/api/settings/report-types/1', { dueDay: 25 })).status).toBe(200);
+    expect(await due(tasks[0].id)).toBe('25');
+    expect(await due(tasks[1].id)).toBe(doneBefore);
+    await L.patch('/api/settings/report-types/1', { dueDay: 15 });
+    expect(await due(tasks[0].id)).toBe('15');
+    await pool.query(`UPDATE task SET status = 'TODO', done_at = NULL WHERE id = $1`, [tasks[1].id]);
+  });
 });
 
 describe('vazifalar: holat, taymer, Bajarildi va undo', () => {

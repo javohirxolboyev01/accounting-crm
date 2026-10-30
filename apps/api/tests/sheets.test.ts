@@ -184,3 +184,30 @@ describe('"Бухгалтер ишлари" fayli importi', () => {
     expect(await detectWorksFile(pool, sheet())).toBeNull();
   });
 });
+
+describe('Import: holat bo\'yicha hisobot ustunlari (Norezident foyda / QQS, V20)', () => {
+  beforeAll(async () => {
+    await resetDb();
+    await seedTeam();
+  });
+  const H = ['№', 'STIR', 'Korxona nomi', 'Soliq turi', 'JSHDS 15.10.2026', 'Norezident foyda', 'Norezident QQS'];
+
+  it('1 -> holat oyi (sentabr) belgisi qo\'yiladi va oktyabr vazifasi Bajarildi; X -> belgi yo\'q', async () => {
+    const rows = [H, ['1', '306234567', 'INSAR MIX TRADE', 'ҚҚС', '1', '1', 'X']];
+    const r = await tx((db) => importTable(db, rows, { actorId: null, dryRun: false }));
+    expect(r.columns.map((c) => c.code)).toEqual(['JSHDS', 'NOREZIDENT_FOYDA', 'NOREZIDENT_QQS']);
+    expect(r.rows[0].review).toEqual([]);
+    const ev = await q(
+      pool,
+      `SELECT rt.code, ev.month FROM client_report_event ev JOIN report_type rt ON rt.id = ev.report_type_id`,
+    );
+    expect(ev).toEqual([{ code: 'NOREZIDENT_FOYDA', month: '2026-09' }]);
+    const t = await one(
+      pool,
+      `SELECT t.status FROM task t JOIN report_type rt ON rt.id = t.report_type_id
+       WHERE rt.code = 'NOREZIDENT_FOYDA' AND t.period = '2026-10-01'`,
+    );
+    expect(t.status).toBe('DONE');
+    expect((await one(pool, 'SELECT count(*)::int AS n FROM client_report_exclusion')).n).toBe(0);
+  });
+});

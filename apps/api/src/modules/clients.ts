@@ -5,7 +5,7 @@ import { audit, diff } from '../common/audit';
 import { AppError, forbidden, notFound, parse } from '../common/errors';
 import { normalizeName, normalizeStir } from '../common/normalize';
 import { decryptSecret, encryptSecret } from '../common/secretBox';
-import { currentPeriod, monthOf } from '../common/time';
+import { addMonthsIso, currentPeriod, monthOf } from '../common/time';
 import { type Db, one, pool, q, tx } from '../db';
 import { reassignOpenTasks, reconcileClient } from './generator';
 
@@ -185,9 +185,16 @@ clientsRouter.get('/:id', async (req, res) => {
      WHERE h.client_id = $1 ORDER BY h.effective_from DESC`,
     [id],
   );
-  const dividendMonths = (
-    await q<{ month: string }>(pool, 'SELECT month FROM client_dividend_month WHERE client_id = $1 ORDER BY month DESC', [id])
-  ).map((r) => r.month);
+  // "Holat bo'yicha" hisobotlar (V20): belgilangan holat oylari bilan; applicable — mijozning hozirgi soliq turiga
+  const events = await q(
+    pool,
+    `SELECT rt.id AS "reportTypeId", rt.code, rt.name, rt.name_ru AS "nameRu", rt.due_day AS "dueDay",
+            CASE WHEN $2 = 'AOS' THEN rt.applies_to_aos ELSE rt.applies_to_qqs END AS applicable,
+            coalesce((SELECT array_agg(ev.month ORDER BY ev.month DESC) FROM client_report_event ev
+                      WHERE ev.client_id = $1 AND ev.report_type_id = rt.id), '{}') AS months
+     FROM report_type rt WHERE rt.active AND rt.requires_event_flag ORDER BY rt.sort_order, rt.id`,
+    [id, c.taxType],
+  );
   // Fayldagi "X": mijoz soliq turidan qat'i nazar topshirmaydigan hisobotlar (V17)
   const reportExclusions = await q(
     pool,
@@ -197,7 +204,7 @@ clientsRouter.get('/:id', async (req, res) => {
      WHERE e.client_id = $1 ORDER BY rt.sort_order, rt.id`,
     [id],
   );
-  res.json({ ...c, taxHistory, dividendMonths, reportExclusions });
+  res.json({ ...c, taxHistory, events, reportExclusions });
 });
 
 clientsRouter.get('/:id/history', async (req, res) => {
@@ -338,46 +345,53 @@ clientsRouter.post('/:id/mehnat-password/reveal', async (req, res) => {
   res.json({ password });
 });
 
-// ---------- Dividend belgisi ----------
-// Dividend to'langan oyda hisobot shu oyda chiqadi (V12). Faqat joriy oy belgilanadi: o'tgan oy uchun
-// reconcile butun davrni (doimiy ishlar bilan) qayta yaratib yuborishi mumkin.
-// TODO(tasdiqlash): belgini rahbar yoki mijozning buxgalteri qo'yadi; o'tgan oyni belgilash kerakmi
-function dividendMonth(raw: string) {
-  const month = parse(monthSchema, raw);
-  if (month !== monthOf(currentPeriod())) {
-    throw new AppError(400, 'DIVIDEND_CURRENT_MONTH', 'Dividend belgisini faqat joriy oy uchun qo\'yish mumkin');
+// ---------- Holat belgisi (dividend, norezident; V20) ----------
+// Belgi = holat bo'lgan oy; hisobot keyingi oyda chiqadi. Faqat joriy yoki o'tgan oy: joriy oy belgisi vazifani keyingi
+// oyning 1-kuni generatsiyada chiqaradi, o'tgan oy belgisi esa joriy davrga darhol (reconcile). Eskiroq oylar uchun
+// reconcile butun davrni (doimiy ishlar bilan) qayta yaratib yuborishi mumkin edi.
+// Belgini rahbar ham, mijozning buxgalteri ham qo'yadi (firma egasi tasdiqladi).
+const eventParams = z.object({
+  id: z.coerce.number().int(),
+  reportTypeId: z.coerce.number().int(),
+  month: monthSchema,
+});
+
+async function eventTarget(db: Db, raw: unknown, u: AuthUser) {
+  const p = parse(eventParams, raw);
+  const now = monthOf(currentPeriod());
+  if (p.month !== now && p.month !== monthOf(addMonthsIso(currentPeriod(), -1))) {
+    throw new AppError(400, 'EVENT_MONTH', "Faqat joriy yoki keyingi oyda topshiriladigan hisobotni belgilash mumkin");
   }
-  return month;
+  await loadClientForUser(db, p.id, u, true);
+  const rt = await one<{ code: string }>(db, 'SELECT code FROM report_type WHERE id = $1 AND requires_event_flag AND active', [p.reportTypeId]);
+  if (!rt) throw notFound('Hisobot');
+  return { ...p, code: rt.code };
 }
 
-clientsRouter.put('/:id/dividend/:month', async (req, res) => {
+clientsRouter.put('/:id/events/:reportTypeId/:month', async (req, res) => {
   const u = me(req);
-  const id = parse(z.coerce.number().int(), req.params.id);
-  const month = dividendMonth(req.params.month);
   await tx(async (db) => {
-    await loadClientForUser(db, id, u, true);
+    const e = await eventTarget(db, req.params, u);
     const r = await db.query(
-      `INSERT INTO client_dividend_month (client_id, month, marked_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-      [id, month, u.id],
+      `INSERT INTO client_report_event (client_id, report_type_id, month, marked_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+      [e.id, e.reportTypeId, e.month, u.id],
     );
     if (r.rowCount) {
-      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'DIVIDEND_MARK', after: { month } });
-      await reconcileClient(db, id, u.id);
+      await audit(db, { actorId: u.id, entity: 'client', entityId: e.id, clientId: e.id, action: 'EVENT_MARK', after: { report: e.code, month: e.month } });
+      await reconcileClient(db, e.id, u.id);
     }
   });
   res.json({ ok: true });
 });
 
-clientsRouter.delete('/:id/dividend/:month', async (req, res) => {
+clientsRouter.delete('/:id/events/:reportTypeId/:month', async (req, res) => {
   const u = me(req);
-  const id = parse(z.coerce.number().int(), req.params.id);
-  const month = dividendMonth(req.params.month);
   await tx(async (db) => {
-    await loadClientForUser(db, id, u, true);
-    const r = await db.query('DELETE FROM client_dividend_month WHERE client_id = $1 AND month = $2', [id, month]);
+    const e = await eventTarget(db, req.params, u);
+    const r = await db.query('DELETE FROM client_report_event WHERE client_id = $1 AND report_type_id = $2 AND month = $3', [e.id, e.reportTypeId, e.month]);
     if (r.rowCount) {
-      await audit(db, { actorId: u.id, entity: 'client', entityId: id, clientId: id, action: 'DIVIDEND_UNMARK', before: { month } });
-      await reconcileClient(db, id, u.id);
+      await audit(db, { actorId: u.id, entity: 'client', entityId: e.id, clientId: e.id, action: 'EVENT_UNMARK', before: { report: e.code, month: e.month } });
+      await reconcileClient(db, e.id, u.id);
     }
   });
   res.json({ ok: true });

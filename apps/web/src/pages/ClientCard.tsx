@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Check, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
@@ -19,7 +19,7 @@ import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import { errorText } from '@/lib/errors';
-import { currentMonth, fmtDate, fmtDateTime, fmtShortDue, monthLabel } from '@/lib/time';
+import { currentMonth, fmtDate, fmtDateTime, fmtShortDue, monthLabel, shiftMonth } from '@/lib/time';
 import type { AuditItem, ClientCard as ClientCardData, ClientStatus, Task, TaxType } from '@/lib/types';
 
 interface Form {
@@ -128,9 +128,11 @@ export default function ClientCard() {
     },
     onError: onErr,
   });
-  const dividend = useMutation({
-    mutationFn: (p: { month: string; on: boolean }) =>
-      p.on ? api.put(`/clients/${id}/dividend/${p.month}`) : api.del(`/clients/${id}/dividend/${p.month}`),
+  const eventMark = useMutation({
+    mutationFn: (p: { reportTypeId: number; month: string; on: boolean }) => {
+      const url = `/clients/${id}/events/${p.reportTypeId}/${p.month}`;
+      return p.on ? api.put(url) : api.del(url);
+    },
     onSuccess: refresh,
     onError: onErr,
   });
@@ -142,7 +144,18 @@ export default function ClientCard() {
 
   const thisMonth = currentMonth();
   const months = t('months', { returnObjects: true }) as string[];
-  const dividendNow = !!q.data?.dividendMonths?.includes(thisMonth);
+  // Holat belgisi faqat o'tgan va joriy oy uchun (server ham tekshiradi)
+  const eventMonths = [shiftMonth(thisMonth, -1), thisMonth];
+  // Bazada holat oyi saqlanadi, kartada esa topshirish oyi (holat oyi + 1) ko'rsatiladi: "Hisobot topshirish"
+  // sahifasi va Excel fayl ham topshirish oyi bo'yicha — buxgalter bitta oy bilan ishlaydi.
+  const filingLabel = (eventMonth: string, dueDay: number | null) => {
+    const m = shiftMonth(eventMonth, 1);
+    if (!dueDay) return monthLabel(m, months);
+    const [y, mo] = m.split('-').map(Number);
+    const day = Math.min(dueDay, new Date(y, mo, 0).getDate());
+    return t('clients.filingDue', { month: monthLabel(m, months), date: `${String(day).padStart(2, '0')}.${String(mo).padStart(2, '0')}` });
+  };
+  const events = q.data?.events?.filter((e) => e.applicable) ?? [];
 
   const taxChanged = q.data && (form.taxType !== q.data.taxType || (form.taxTypeEffectiveFrom || '') !== (q.data.taxTypeEffectiveFrom ?? ''));
   const submit = (e: React.FormEvent) => {
@@ -255,27 +268,42 @@ export default function ClientCard() {
               ))}
             </ul>
           </Card>
-          <Card>
-            <CardHeader title={t('clients.dividend')} />
-            <div className="space-y-3 p-4 text-sm">
-              <p className="text-xs text-gray-500">{t('clients.dividendHint')}</p>
-              {/* Faqat joriy oy belgilanadi (server ham tekshiradi); o'tgan oylar tarix sifatida */}
-              <Button
-                variant={dividendNow ? 'default' : 'outline'}
-                onClick={() => dividend.mutate({ month: thisMonth, on: !dividendNow })}
-                disabled={dividend.isPending}
-              >
-                {t(dividendNow ? 'clients.unmarkDividend' : 'clients.markDividend', { month: monthLabel(thisMonth, months) })}
-              </Button>
-              <ul className="flex flex-wrap gap-2">
-                {q.data.dividendMonths?.map((dm) => (
-                  <li key={dm} className="inline-flex items-center rounded-full border bg-gray-50 px-2 py-0.5 text-xs">
-                    {monthLabel(dm, months)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </Card>
+          {events.length > 0 && (
+            <Card>
+              <CardHeader title={t('clients.events')} />
+              <div className="space-y-4 p-4 text-sm">
+                <p className="text-xs text-gray-500">{t('clients.eventsHint')}</p>
+                {events.map((e) => {
+                  const older = e.months.filter((m) => !eventMonths.includes(m));
+                  return (
+                    <div key={e.reportTypeId} className="space-y-1.5">
+                      <div className="font-medium">{t(`clients.eventLabel.${e.code}`, { defaultValue: i18n.language === 'ru' ? e.nameRu : e.name })}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {eventMonths.map((m) => {
+                          const on = e.months.includes(m);
+                          return (
+                            <Button
+                              key={m}
+                              size="sm"
+                              variant={on ? 'default' : 'outline'}
+                              aria-pressed={on}
+                              disabled={eventMark.isPending}
+                              onClick={() => eventMark.mutate({ reportTypeId: e.reportTypeId, month: m, on: !on })}
+                            >
+                              {on && <Check className="h-3.5 w-3.5" />} {filingLabel(m, e.dueDay)}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      {older.length > 0 && (
+                        <div className="text-xs text-gray-500">{t('clients.eventsEarlier')}: {older.map((m) => monthLabel(shiftMonth(m, 1), months)).join(', ')}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
           {q.data.reportExclusions?.length > 0 && (
             <Card>
               <CardHeader title={t('clients.reportExclusions')} />

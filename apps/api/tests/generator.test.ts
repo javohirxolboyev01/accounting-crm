@@ -111,21 +111,41 @@ describe('vazifa generatori', () => {
     expect(cell('BALANS').state).toBe('!');
   });
 
-  it('dividend: belgilangan oyning o\'zida, muddat shu oyning due_day kuni', async () => {
-    const c = await client('305123456', 'AOS');
-    await pool.query(`INSERT INTO client_dividend_month (client_id, month) VALUES ($1, '2026-11')`, [c]);
+  it('holat bo\'yicha hisobot: belgi holat oyiga, hisobot keyingi oyda (V20)', async () => {
+    const c = await client('306234567', 'QQS');
+    // Oktyabrda norezidentga daromad to'landi -> noyabr vazifasi, muddat 20.11
+    await pool.query(
+      `INSERT INTO client_report_event (client_id, report_type_id, month)
+       SELECT $1, id, '2026-10' FROM report_type WHERE code IN ('NOREZIDENT_FOYDA', 'DIVIDEND')`,
+      [c],
+    );
     await gen('2026-10-01');
     await gen('2026-11-01');
     await gen('2026-12-01');
-    expect(await reportCodes(c, '2026-10-01')).not.toContain('DIVIDEND');
-    expect(await reportCodes(c, '2026-12-01')).not.toContain('DIVIDEND');
+    expect(await reportCodes(c, '2026-10-01')).not.toContain('NOREZIDENT_FOYDA');
+    expect(await reportCodes(c, '2026-11-01')).toEqual(expect.arrayContaining(['NOREZIDENT_FOYDA', 'DIVIDEND']));
+    expect(await reportCodes(c, '2026-11-01')).not.toContain('NOREZIDENT_QQS'); // alohida belgi
+    expect(await reportCodes(c, '2026-12-01')).not.toContain('NOREZIDENT_FOYDA');
     const t = await one<any>(
       pool,
       `SELECT to_char(t.due_at AT TIME ZONE 'Asia/Tashkent', 'DD.MM.YYYY') AS due FROM task t
-       JOIN report_type rt ON rt.id = t.report_type_id WHERE t.client_id = $1 AND rt.code = 'DIVIDEND'`,
+       JOIN report_type rt ON rt.id = t.report_type_id WHERE t.client_id = $1 AND rt.code = 'NOREZIDENT_FOYDA'`,
       [c],
     );
     expect(t.due).toBe('20.11.2026');
+  });
+
+  it('norezident hisobotlari faqat QQS to\'lovchilarga', async () => {
+    const c = await client('305123456', 'AOS');
+    await pool.query(
+      `INSERT INTO client_report_event (client_id, report_type_id, month)
+       SELECT $1, id, '2026-10' FROM report_type WHERE code IN ('NOREZIDENT_FOYDA', 'NOREZIDENT_QQS')`,
+      [c],
+    );
+    await gen('2026-11-01');
+    const codes = await reportCodes(c, '2026-11-01');
+    expect(codes).not.toContain('NOREZIDENT_FOYDA');
+    expect(codes).not.toContain('NOREZIDENT_QQS');
   });
 
   it('idempotent: ikkinchi ishga tushirish dublikat yaratmaydi', async () => {

@@ -27,7 +27,7 @@ const CELL: Record<CellState, { sym: string; cls: string }> = {
 };
 
 // Sarlavha ostida muddat sanasi ko'rsatilmaydigan ustunlar (rahbar talabi)
-const NO_DUE_DATE = new Set(['INPS', 'PORUCHENYA_JSHDS', 'DIVIDEND', 'MOLIYAVIY_NATIJA', 'BALANS', 'STATISTIKA']);
+const NO_DUE_DATE = new Set(['INPS', 'PORUCHENYA_JSHDS', 'DIVIDEND', 'NOREZIDENT_FOYDA', 'NOREZIDENT_QQS', 'MOLIYAVIY_NATIJA', 'BALANS', 'STATISTIKA']);
 
 export default function Monthly() {
   const { t, i18n } = useTranslation();
