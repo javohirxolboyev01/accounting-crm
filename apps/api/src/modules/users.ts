@@ -4,6 +4,7 @@ import { me, requireAuth, requireLeader } from '../common/auth';
 import { audit, diff } from '../common/audit';
 import { AppError, notFound, parse } from '../common/errors';
 import { one, pool, q, tx } from '../db';
+import { reassignOpenTasks } from './generator';
 import { hashPassword, passwordSchema } from './auth';
 
 const USER = `id, role, full_name AS "fullName", login, language, active,
@@ -26,7 +27,7 @@ usersRouter.get('/accountants', requireAuth, async (_req, res) => {
 usersRouter.use(requireAuth, requireLeader);
 
 usersRouter.get('/', async (_req, res) => {
-  res.json(await q(pool, `SELECT ${USER} FROM app_user ORDER BY active DESC, role, full_name`));
+  res.json(await q(pool, `SELECT ${USER} FROM app_user WHERE deleted_at IS NULL ORDER BY active DESC, role, full_name`));
 });
 
 usersRouter.post('/', async (req, res) => {
@@ -70,7 +71,7 @@ usersRouter.patch('/:id', async (req, res) => {
     throw new AppError(400, 'SELF_LOCKOUT', 'O\'zingizni faolsizlantira yoki rolingizni pasaytira olmaysiz');
   }
   const user = await tx(async (db) => {
-    const before = await one(db, `SELECT ${USER} FROM app_user WHERE id = $1 FOR UPDATE`, [id]);
+    const before = await one(db, `SELECT ${USER} FROM app_user WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [id]);
     if (!before) throw notFound('Foydalanuvchi');
     const u = await one(
       db,
@@ -90,29 +91,54 @@ usersRouter.patch('/:id', async (req, res) => {
   res.json(user);
 });
 
-// Butunlay o'chirish faqat ish tarixi yo'q xodim uchun (masalan xato yaratilgan).
-// Tarix bo'lsa (vazifa, audit_log, qo'ng'iroq, taymer, biriktirilgan mijoz) FK o'chirishga yo'l qo'ymaydi:
-// audit_log o'zgarmas, shuning uchun bunday xodim faqat faolsizlantiriladi.
+// O'chirish: ish tarixi yo'q xodim bazadan butunlay o'chadi. Tarixi bor xodim (vazifa, audit_log, qo'ng'iroq, taymer)
+// jismonan o'chirilmaydi — audit_log o'zgarmas (CLAUDE.md 9). U deleted_at bilan hamma ro'yxatdan yashiriladi,
+// kira olmaydi, login bo'shatiladi; mijozlari va ochiq vazifalari buxgalterisiz qoladi (rahbar qayta tayinlaydi).
 usersRouter.delete('/:id', async (req, res) => {
   const actor = me(req);
   const id = parse(z.coerce.number().int(), req.params.id);
   if (id === actor.id) throw new AppError(400, 'SELF_DELETE', 'O\'zingizni o\'chira olmaysiz');
+  const before = await one(pool, `SELECT ${USER} FROM app_user WHERE id = $1 AND deleted_at IS NULL`, [id]);
+  if (!before) throw notFound('Foydalanuvchi');
   try {
     await tx(async (db) => {
-      const before = await one(db, `SELECT ${USER} FROM app_user WHERE id = $1 FOR UPDATE`, [id]);
-      if (!before) throw notFound('Foydalanuvchi');
-      // Xodimning shaxsiy (tarix bo'lmagan) yozuvlari u bilan birga ketadi
       await db.query('DELETE FROM refresh_token WHERE user_id = $1', [id]);
       await db.query('DELETE FROM notification WHERE user_id = $1', [id]);
       await db.query('DELETE FROM app_user WHERE id = $1', [id]);
       await audit(db, { actorId: actor.id, entity: 'app_user', entityId: id, action: 'DELETE', before });
     });
+    return res.json({ ok: true });
   } catch (e) {
-    if ((e as { code?: string }).code === '23503') {
-      throw new AppError(409, 'USER_HAS_HISTORY', 'Xodimning ish tarixi bor: o\'chirib bo\'lmaydi, faolsizlantiring');
-    }
-    throw e;
+    if ((e as { code?: string }).code !== '23503') throw e;
   }
+  // Tarixi bor: yashiriladi (yuqoridagi tranzaksiya to'liq bekor bo'lgan)
+  await tx(async (db) => {
+    const clients = await q<{ id: number }>(db, 'SELECT id FROM client WHERE accountant_id = $1 FOR UPDATE', [id]);
+    for (const c of clients) {
+      await db.query('UPDATE client SET accountant_id = NULL WHERE id = $1', [c.id]);
+      await audit(db, { actorId: actor.id, entity: 'client', entityId: c.id, clientId: c.id, action: 'UPDATE', before: { accountantId: id }, after: { accountantId: null } });
+      await reassignOpenTasks(db, c.id, null, actor.id);
+    }
+    // Boshqa mijozlardagi ochiq vazifalari (shoshilinch, qo'lda) ham bo'shatiladi
+    const rest = await q<{ id: number; clientId: number }>(
+      db,
+      `UPDATE task SET assignee_id = NULL WHERE assignee_id = $1 AND status IN ('TODO', 'IN_PROGRESS', 'WAITING_CLIENT')
+       RETURNING id, client_id AS "clientId"`,
+      [id],
+    );
+    for (const t of rest) {
+      await audit(db, { actorId: actor.id, entity: 'task', entityId: t.id, clientId: t.clientId, action: 'REASSIGN', before: { assigneeId: id }, after: { assigneeId: null } });
+    }
+    await db.query('UPDATE time_entry SET ended_at = now() WHERE user_id = $1 AND ended_at IS NULL', [id]);
+    await db.query('DELETE FROM refresh_token WHERE user_id = $1', [id]);
+    await db.query("UPDATE notification SET cancelled_at = now() WHERE user_id = $1 AND delivered_at IS NULL AND cancelled_at IS NULL", [id]);
+    // '~' login qoidasida yo'q: yangi xodim shu loginni bemalol oladi
+    await db.query(
+      `UPDATE app_user SET deleted_at = now(), active = false, telegram_chat_id = NULL, login = login || '~' || id WHERE id = $1`,
+      [id],
+    );
+    await audit(db, { actorId: actor.id, entity: 'app_user', entityId: id, action: 'DELETE', before });
+  });
   res.json({ ok: true });
 });
 
@@ -122,7 +148,7 @@ usersRouter.post('/:id/reset-password', async (req, res) => {
   const { password } = parse(z.object({ password: passwordSchema }), req.body);
   await tx(async (db) => {
     const r = await db.query(
-      'UPDATE app_user SET password_hash = $2, failed_login_count = 0, locked_until = NULL WHERE id = $1',
+      'UPDATE app_user SET password_hash = $2, failed_login_count = 0, locked_until = NULL WHERE id = $1 AND deleted_at IS NULL',
       [id, await hashPassword(password)],
     );
     if (!r.rowCount) throw notFound('Foydalanuvchi');
@@ -132,15 +158,20 @@ usersRouter.post('/:id/reset-password', async (req, res) => {
   res.json({ ok: true });
 });
 
-/** Birinchi ishga tushishda rahbar (.env dan), agar bazada foydalanuvchi bo'lmasa */
+/**
+ * Asosiy rahbar (.env: BOOTSTRAP_LEADER_*): shu login bazada bo'lmasa ishga tushishda yaratiladi.
+ * Bor bo'lsa tegilmaydi — parolni u keyin Profil'da o'zgartirsa, har deploy'da eskisiga qaytmasin.
+ * Shunday qilib serverga (Railway) faqat o'zgaruvchilarni qo'yish yetadi, qolgan xodimlarni rahbar saytdan qo'shadi.
+ */
 export async function bootstrapLeader(login: string, password: string, fullName: string) {
   if (!login || !password) return false;
-  const exists = await one<{ n: number }>(pool, 'SELECT count(*) AS n FROM app_user');
-  if (exists!.n > 0) return false;
+  const exists = await one(pool, 'SELECT id FROM app_user WHERE login = $1', [login]);
+  if (exists) return false;
+  passwordSchema.parse(password);
   await pool.query(
     `INSERT INTO app_user (full_name, login, password_hash, role) VALUES ($1, $2, $3, 'LEADER')`,
     [fullName, login, await hashPassword(password)],
   );
-  console.log(`Boshlang'ich rahbar yaratildi: ${login}`);
+  console.log(`Asosiy rahbar yaratildi: ${login}`);
   return true;
 }

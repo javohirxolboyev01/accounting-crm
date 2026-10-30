@@ -38,7 +38,7 @@ const uz = {
     ALREADY_DONE: 'Vazifa allaqachon bajarilgan', TASK_CANCELLED: 'Vazifa bekor qilingan', NOT_DONE: 'Vazifa bajarilgan holatda emas',
     UNDO_EXPIRED: "Bekor qilish vaqti (5 soniya) o'tib ketdi", INVALID_ASSIGNEE: 'Buxgalter topilmadi', TEMPLATE_NOT_FOUND: 'Shablon topilmadi',
     INVALID_ACCOUNTANT: 'Buxgalter topilmadi yoki faol emas', SELF_LOCKOUT: "O'zingizni faolsizlantira yoki rolingizni pasaytira olmaysiz",
-    SELF_DELETE: "O'zingizni o'chira olmaysiz", USER_HAS_HISTORY: "Xodimning ish tarixi bor, o'chirib bo'lmaydi. Uning o'rniga «Faolsizlantirish»ni bosing.",
+    SELF_DELETE: "O'zingizni o'chira olmaysiz",
     WRONG_PASSWORD: "Joriy parol noto'g'ri", INVALID_MONTH: "Oy noto'g'ri", EVENT_MONTH: "Faqat joriy yoki keyingi oyda topshiriladigan hisobotni belgilash mumkin", HEADER_NOT_FOUND: 'Jadval sarlavhasi topilmadi (STIR va hisobot ustunlari kerak)',
     BAD_FILE: 'Faqat .xlsx fayl', SHEET_NOT_FOUND: 'Varaq topilmadi', WRONG_FILE_KIND: 'Fayl bu sahifaga tegishli emas',
     FILE_ALREADY_IMPORTED: 'Bu fayl allaqachon yuklangan',
@@ -150,7 +150,7 @@ const uz = {
     passwordHint: '6–12 ta raqam', role: 'Rol', language: 'Til', created: "Qo'shilgan", resetPassword: 'Parolni tiklash',
     passwordReset: 'Parol yangilandi', deactivate: 'Faolsizlantirish', activate: 'Faollashtirish',
     deleteTitle: "{{name}} — o'chirilsinmi?", deleted: "Xodim o'chirildi",
-    deleteText: "Xodim butunlay o'chiriladi. Ish tarixi bor xodimni (vazifa, o'zgarishlar tarixi, qo'ng'iroqlar) o'chirib bo'lmaydi — uni faolsizlantiring.",
+    deleteText: "Xodim ro'yxatdan o'chiriladi va tizimga kira olmaydi. Uning mijozlari va ochiq vazifalari buxgalterisiz qoladi — keyin boshqa buxgalterga tayinlang. Bajargan ishlari tarixda qoladi.",
   },
   profile: {
     title: 'Profil', language: 'Interfeys tili', changePassword: "Parolni o'zgartirish", currentPassword: 'Joriy parol',

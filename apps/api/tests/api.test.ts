@@ -71,15 +71,26 @@ describe('auth', () => {
     expect(await one(pool, 'SELECT id FROM app_user WHERE id = $1', [fresh])).toBeFalsy();
     expect(await one(pool, `SELECT id FROM audit_log WHERE entity = 'app_user' AND entity_id = $1 AND action = 'DELETE'`, [fresh])).toBeTruthy();
 
-    // Rahbar audit_log'da actor: o'chirilmaydi
+    // Tarixi bor xodim (audit_log'da actor, mijozi bor): bazada qoladi, lekin ro'yxatdan yo'qoladi, kira olmaydi, login bo'shaydi
     const other = await createUser('leader2', 'LEADER');
     const L2 = api(await token('leader2'));
     await L2.patch(`/api/users/${team.acc2}`, { fullName: 'Bobur Aliyev' });
-    const r = await L.del(`/api/users/${other}`);
-    expect(r.status).toBe(409);
-    expect(r.body.code).toBe('USER_HAS_HISTORY');
-    expect(await one(pool, 'SELECT id FROM app_user WHERE id = $1', [other])).toBeTruthy();
-    await L.patch(`/api/users/${other}`, { active: false }); // keyingi testlar bildirishnomasiga aralashmasin
+    expect((await L.del(`/api/users/${other}`)).status).toBe(200);
+    expect(await one(pool, 'SELECT login, active, deleted_at FROM app_user WHERE id = $1', [other])).toMatchObject({ login: `leader2~${other}`, active: false });
+    expect((await L.get('/api/users')).body.some((u: { id: number }) => u.id === other)).toBe(false);
+    expect((await request(app).post('/api/auth/login').send({ login: 'leader2', password: 'Parol123!' })).status).toBe(401);
+    expect((await L.del(`/api/users/${other}`)).status).toBe(404);
+    expect((await L.patch(`/api/users/${other}`, { active: true })).status).toBe(404);
+    expect((await L.post('/api/users', { fullName: 'Yangi', login: 'leader2', password: '135792468', role: 'LEADER' })).status).toBe(201);
+    await L.patch(`/api/users/${(await one(pool, `SELECT id FROM app_user WHERE login = 'leader2'`)).id}`, { active: false });
+
+    // Buxgalter o'chirilsa mijozlari buxgalterisiz qoladi
+    const acc = await createUser('acc-del', 'ACCOUNTANT');
+    const c = await L.post('/api/clients', { stir: '309111222', name: 'DEL TEST', taxType: 'AOS', accountantId: acc });
+    expect(c.status).toBe(201);
+    expect((await L.del(`/api/users/${acc}`)).status).toBe(200);
+    expect((await one(pool, 'SELECT accountant_id FROM client WHERE id = $1', [c.body.id])).accountant_id).toBeNull();
+    expect(await one(pool, `SELECT id FROM task WHERE assignee_id = $1 AND status <> 'DONE'`, [acc])).toBeFalsy();
 
     expect((await L.del(`/api/users/${team.leader}`)).body.code).toBe('SELF_DELETE');
     expect((await L.del('/api/users/999999')).status).toBe(404);

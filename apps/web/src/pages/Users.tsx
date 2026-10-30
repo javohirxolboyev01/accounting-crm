@@ -62,7 +62,7 @@ export default function Users() {
     onError: onErr,
   });
   const toggle = useMutation({ mutationFn: (u: User) => api.patch(`/users/${u.id}`, { active: !u.active }), onSuccess: refresh, onError: onErr });
-  // Ish tarixi bor xodimni server o'chirmaydi (USER_HAS_HISTORY) — xabarda faolsizlantirish taklif qilinadi
+  // Tarixi bor xodim bazada qoladi, lekin ro'yxatdan yo'qoladi va kira olmaydi (server: DELETE /users/:id)
   const remove = useMutation({
     mutationFn: (u: User) => api.del(`/users/${u.id}`),
     onSuccess: () => {
