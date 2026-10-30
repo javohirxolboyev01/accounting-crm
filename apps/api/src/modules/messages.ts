@@ -18,6 +18,22 @@ export function renderNotification(kind: string, p: any, lang: Lang): string {
       return uz
         ? `🔴 Muddat o'tdi: ${p.taskTitle}\nMijoz: ${p.clientName}\nMuddat: ${fmt(p.dueAt)}\nMas'ul: ${p.assigneeName ?? '—'}`
         : `🔴 Срок истёк: ${p.taskTitle}\nКлиент: ${p.clientName}\nСрок: ${fmt(p.dueAt)}\nОтветственный: ${p.assigneeName ?? '—'}`;
+    case 'CLIENTS_OVERDUE': {
+      const MAX = 20;
+      const list: any[] = p.clients ?? [];
+      const lines = list.slice(0, MAX).map((c, i) => {
+        const who = p.scope === 'ALL' && c.accountantName ? ` (${c.accountantName})` : '';
+        const wait = c.waiting ? (uz ? `, ${c.waiting} tasi mijozdan kutilmoqda` : `, ${c.waiting} ждут клиента`) : '';
+        return uz
+          ? `${i + 1}. ${c.clientName} — ${c.days} kun, ${c.tasks} ta vazifa${wait}${who}`
+          : `${i + 1}. ${c.clientName} — ${c.days} дн., задач: ${c.tasks}${wait}${who}`;
+      });
+      if (list.length > MAX) lines.push(uz ? `… va yana ${list.length - MAX} ta mijoz` : `… и ещё клиентов: ${list.length - MAX}`);
+      const date = p.date ? DateTime.fromISO(p.date).toFormat('dd.MM.yyyy') : '';
+      return uz
+        ? `⏰ Kechikkan mijozlar (${date})\nEslatma: ${p.clientCount} ta mijoz, ${p.taskCount} ta vazifa (jami kechikkan mijozlar: ${p.totalOverdueClients})\n\n${lines.join('\n')}`
+        : `⏰ Просроченные клиенты (${date})\nНапоминание: клиентов ${p.clientCount}, задач ${p.taskCount} (всего просроченных клиентов: ${p.totalOverdueClients})\n\n${lines.join('\n')}`;
+    }
     case 'URGENT_TASK':
       return uz
         ? `🚨 Shoshilinch vazifa: ${p.title}\nMijoz: ${p.clientName}\nMuddat: ${fmt(p.dueAt)}\nKim berdi: ${p.createdByName}`

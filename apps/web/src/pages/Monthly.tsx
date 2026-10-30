@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronLeft, ChevronRight, FileSpreadsheet, FileText } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { NoteCell } from '@/components/NoteCell';
 import { SheetImportActions } from '@/components/SheetImport';
 import { Button } from '@/components/ui/button';
@@ -11,11 +13,13 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Empty, QueryState } from '@/components/ui/states';
 import { TableSkeleton } from '@/components/ui/skeleton';
+import { Logo } from '@/components/Logo';
 import { useAccountants, useMarkDone } from '@/hooks/tasks';
 import { useOpenTask } from '@/hooks/outlet';
 import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
+import { errorText } from '@/lib/errors';
 import { currentMonth, fmtIsoDate, monthLabel, shiftMonth } from '@/lib/time';
 import type { CellState, Grid } from '@/lib/types';
 
@@ -48,6 +52,55 @@ export default function Monthly() {
   const SHORT: Record<string, string> = { TOLOV_MANBAI: 'monthly.tolovShort', PORUCHENYA_JSHDS: 'monthly.poruchShort', FOYDA: 'monthly.foydaShort' };
   const colShort = (c: Grid['columns'][number]) => (SHORT[c.code] ? t(SHORT[c.code]) : colName(c));
 
+  // Yuklab olish: faqat jadvalning o'zi, filtrsiz (buxgalterga server o'z mijozlarini beradi)
+  const [busy, setBusy] = useState<'xlsx' | 'pdf' | null>(null);
+  const [printData, setPrintData] = useState<{
+    grid: Grid;
+    downloadedByName: string;
+    downloadedByRole: 'LEADER' | 'ACCOUNTANT';
+  } | null>(null);
+  const downloadXlsx = async () => {
+    setBusy('xlsx');
+    try {
+      await api.download(`/monthly-grid/export.xlsx${qs({ month })}`, `hisobot-${month}.xlsx`);
+    } catch (e) {
+      toast.error(errorText(e, t));
+    } finally {
+      setBusy(null);
+    }
+  };
+  // PDF: brauzerning chop etish oynasi ("PDF sifatida saqlash"), serverda PDF dvijoki shart emas
+  const downloadPdf = async () => {
+    setBusy('pdf');
+    try {
+      const [grid, pdfInfo] = await Promise.all([
+        api.get<Grid>(`/monthly-grid${qs({ month })}`),
+        api.get<{ downloadedByName: string; downloadedByRole: 'LEADER' | 'ACCOUNTANT' }>('/users/report-pdf-info'),
+      ]);
+      setPrintData({ grid, ...pdfInfo });
+    } catch (e) {
+      toast.error(errorText(e, t));
+      setBusy(null);
+    }
+  };
+  useEffect(() => {
+    if (!printData) return;
+    const title = document.title;
+    document.title = `hisobot-${printData.grid.period}`; // PDF fayl nomi shundan olinadi
+    const done = () => {
+      document.title = title;
+      setPrintData(null);
+      setBusy(null);
+    };
+    // afterprint: print() bloklamaydigan brauzerlarda jadval oyna yopilguncha turadi
+    window.addEventListener('afterprint', done, { once: true });
+    const id = requestAnimationFrame(() => window.print());
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener('afterprint', done);
+    };
+  }, [printData]);
+
   return (
     <div>
       <PageHeader
@@ -55,6 +108,8 @@ export default function Monthly() {
         actions={
           <>
           {isLeader && <SheetImportActions kind="REPORTS" />}
+          <Button variant="outline" onClick={downloadXlsx} disabled={!!busy}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
+          <Button variant="outline" onClick={downloadPdf} disabled={!!busy}><FileText className="h-4 w-4" /> PDF</Button>
           <div className="flex items-center gap-1">
             <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, -1))} aria-label={t('common.prev')}><ChevronLeft className="h-4 w-4" /></Button>
             <span className="min-w-[140px] text-center text-sm font-medium capitalize">{monthLabel(month, t('months', { returnObjects: true }) as string[])}</span>
@@ -163,7 +218,83 @@ export default function Monthly() {
         </QueryState>
       </Card>
       <p className="mt-2 text-xs text-gray-500">{t('monthly.hint')}</p>
+      {printData && createPortal(<PrintTable {...printData} colShort={colShort} />, document.body)}
     </div>
   );
 }
 
+const PRINT_CELL: Record<CellState, { sym: string; cls?: string }> = {
+  '1': { sym: '1', cls: 'done' },
+  '0': { sym: '0' },
+  '!': { sym: '0', cls: 'overdue' },
+  X: { sym: 'X', cls: 'na' },
+};
+
+/** Faqat chop etishda ko'rinadigan oddiy jadval (index.css: .print-root) — ranglar mavzudan mustaqil */
+function PrintTable({
+  grid: g,
+  downloadedByName,
+  downloadedByRole,
+  colShort,
+}: {
+  grid: Grid;
+  downloadedByName: string;
+  downloadedByRole: 'LEADER' | 'ACCOUNTANT';
+  colShort: (c: Grid['columns'][number]) => string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="print-root">
+      <header className="print-heading">
+        <div className="print-brand">
+          <Logo variant="row" className="print-logo" />
+          <div>
+            <h1>{t('monthly.title')}</h1>
+            <p>{monthLabel(g.period, t('months', { returnObjects: true }) as string[])}</p>
+          </div>
+        </div>
+        <div className="print-leader">
+          <strong>{downloadedByName}</strong>
+          <span className="print-role">{t(`monthly.roles.${downloadedByRole}`)}</span>
+          <div className="print-signature">
+            <span>{t('monthly.signature')}</span>
+            <span className="print-signature-line" aria-hidden="true" />
+          </div>
+        </div>
+      </header>
+      <table className="print-grid">
+        <thead>
+          <tr>
+            <th>{t('monthly.no')}</th>
+            <th>{t('monthly.stir')}</th>
+            <th>{t('monthly.company')}</th>
+            <th>{t('clients.taxType')}</th>
+            {g.columns.map((c) => (
+              <th key={c.reportTypeId}>
+                {colShort(c)}
+                {!NO_DUE_DATE.has(c.code) && c.dueDate && <div className="due">{fmtIsoDate(c.dueDate)}</div>}
+              </th>
+            ))}
+            <th>{t('monthly.note')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {g.rows.map((r, i) => (
+            <tr key={r.clientId}>
+              <td className="c">{i + 1}</td>
+              <td>{r.stir}</td>
+              <td>{r.name}</td>
+              <td className="c">{r.taxType}</td>
+              {g.columns.map((c) => {
+                const cell = r.cells[c.reportTypeId];
+                const m = cell ? PRINT_CELL[cell.state] : null;
+                return <td key={c.reportTypeId} className={cn('c', m?.cls)}>{m?.sym}</td>;
+              })}
+              <td className="note">{r.note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

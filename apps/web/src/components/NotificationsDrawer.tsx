@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
-import { CheckCheck, CircleCheck, Clock, Handshake, Siren, X, type LucideIcon } from 'lucide-react';
+import { CalendarClock, CheckCheck, CircleCheck, Clock, Handshake, Siren, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -13,9 +13,15 @@ import type { AppNotification, NotificationKind, Paged } from '@/lib/types';
 
 const params = (n: AppNotification, t: TFunction) => {
   const p = n.payload ?? {};
+  // CLIENTS_OVERDUE: ro'yxat kechikish kuni bo'yicha kamayib boradi, birinchisi — eng uzog'i
+  const worst = p.clients?.[0];
   return {
     title: p.taskTitle ?? p.title ?? '',
-    client: p.clientName ?? '',
+    client: p.clientName ?? worst?.clientName ?? '',
+    count: p.clientCount ?? 0,
+    tasks: p.taskCount ?? 0,
+    days: worst?.days ?? 0,
+    total: p.totalOverdueClients ?? 0,
     actor: p.actorName ?? t('notif.system'),
     due: p.dueAt ? fmtDateTime(p.dueAt) : '—',
     assignee: p.assigneeName ?? '—',
@@ -33,6 +39,7 @@ export function notificationText(n: AppNotification, t: TFunction) {
 const KIND_STYLE: Record<NotificationKind, { icon: LucideIcon; border: string; tile: string }> = {
   URGENT_TASK: { icon: Siren, border: 'border-l-red-500', tile: 'bg-red-50 text-red-500' },
   TASK_OVERDUE: { icon: Clock, border: 'border-l-amber-400', tile: 'bg-amber-50 text-amber-500' },
+  CLIENTS_OVERDUE: { icon: CalendarClock, border: 'border-l-red-500', tile: 'bg-red-50 text-red-500' },
   TASK_DONE: { icon: CircleCheck, border: 'border-l-green-500', tile: 'bg-green-50 text-green-600' },
   LEAD_WON: { icon: Handshake, border: 'border-l-brand-500', tile: 'bg-brand-50 text-brand-600' },
 };
@@ -114,6 +121,9 @@ export function NotificationsDrawer({ open, onClose, onOpenTask }: { open: boole
                         if (n.taskId) {
                           onClose();
                           onOpenTask(n.taskId);
+                        } else if (n.kind === 'CLIENTS_OVERDUE') {
+                          onClose();
+                          navigate(n.payload?.scope === 'ALL' ? '/dashboard' : '/my-day');
                         } else if (n.payload?.leadId) {
                           onClose();
                           navigate(`/leads?lead=${n.payload.leadId}`);

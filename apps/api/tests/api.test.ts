@@ -148,6 +148,21 @@ describe('mijozlar', () => {
     expect(open.n).toBe(0);
     await L.patch(`/api/clients/${qqsClient}`, { accountantId: team.acc2 });
   });
+
+  it('buxgalter keyin tayinlansa biriktirilmagan vazifalar unga o\'tadi (buxgalter vazifasi bo\'lmagan hisobot bo\'sh qoladi)', async () => {
+    const c = await L.post('/api/clients', { stir: '309333444', name: 'ORPHAN TEST', taxType: 'AOS' });
+    expect(c.status).toBe(201);
+    const count = (where: string) =>
+      one(pool, `SELECT count(*)::int AS n FROM task t LEFT JOIN report_type rt ON rt.id = t.report_type_id WHERE t.client_id = $1 AND ${where}`, [c.body.id]);
+    expect((await count('t.assignee_id IS NOT NULL')).n).toBe(0);
+    expect((await count("t.kind = 'ROUTINE'")).n).toBeGreaterThan(0);
+
+    await L.patch(`/api/clients/${c.body.id}`, { accountantId: team.acc1 });
+    expect((await count(`t.kind = 'ROUTINE' AND t.assignee_id IS DISTINCT FROM ${team.acc1}`)).n).toBe(0);
+    expect((await count(`rt.code = 'INPS' AND t.assignee_id = ${team.acc1}`)).n).toBe(1);
+    expect((await count(`rt.code = 'JSHDS' AND t.assignee_id IS NULL`)).n).toBe(1);
+    await L.patch(`/api/clients/${c.body.id}`, { accountantId: null });
+  });
 });
 
 describe('sozlamalar', () => {
@@ -282,6 +297,35 @@ describe('oylik jadval', () => {
     expect(r.status).toBe(200);
     const g2 = await A1.get('/api/monthly-grid');
     expect(g2.body.rows[0].cells[cols.JSHDS].state).toBe('1');
+  });
+
+  it('Excel yuklab olish: buxgalterga faqat o\'z mijozlari, katak 1/0/X', async () => {
+    const ExcelJS = (await import('exceljs')).default;
+    const read = async (r: request.Response) => {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(r.body);
+      const ws = wb.worksheets[0];
+      const head = (ws.getRow(1).values as any[]).slice(1).map(String);
+      const rows = [] as any[][];
+      ws.eachRow((row, n) => n > 1 && rows.push((row.values as any[]).slice(1)));
+      return { head, rows };
+    };
+    const bin = (req: request.Test) => req.buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    const r = await bin(A1.get('/api/monthly-grid/export.xlsx'));
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toContain('spreadsheetml');
+    const { head, rows } = await read(r);
+    expect(rows).toHaveLength(1);
+    const col = (prefix: string) => head.findIndex((x) => x.toUpperCase().startsWith(prefix));
+    expect(rows[0][col('QQS')]).toBe('X');
+    expect(rows[0][col('JSHDS')]).toBe('1');
+    expect(['0', '1']).toContain(rows[0][col('INPS')]);
+    const all = await read(await bin(L.get('/api/monthly-grid/export.xlsx')));
+    expect(all.rows.length).toBeGreaterThan(1);
   });
 });
 

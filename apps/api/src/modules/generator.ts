@@ -168,15 +168,21 @@ export async function reconcileClient(db: Db, clientId: number, actorId: number 
   return { cancelled, created: gen.created, reopened: gen.reopened };
 }
 
-/** 6.8: buxgalter almashsa ochiq vazifalar yangisiga o'tadi, DONE eskisida qoladi */
+/**
+ * 6.8: buxgalter almashsa ochiq vazifalar yangisiga o'tadi, DONE eskisida qoladi.
+ * Biriktirilmagan vazifalar ham (mijozga buxgalter keyinroq qo'yilsa) o'tadi — faqat
+ * creates_accountant_task = false hisobotlar emas: ular ataylab hech kimga biriktirilmaydi.
+ */
 export async function reassignOpenTasks(db: Db, clientId: number, newAccountantId: number | null, actorId: number) {
   const moved = await q(
     db,
     `WITH old AS (
-       SELECT id, assignee_id FROM task
-       WHERE client_id = $1 AND status IN ('TODO', 'IN_PROGRESS', 'WAITING_CLIENT')
-         AND assignee_id IS NOT NULL AND assignee_id IS DISTINCT FROM $2
-         AND kind IN ('ROUTINE', 'REPORT', 'URGENT', 'MANUAL')
+       SELECT t.id, t.assignee_id FROM task t
+       LEFT JOIN report_type rt ON rt.id = t.report_type_id
+       WHERE t.client_id = $1 AND t.status IN ('TODO', 'IN_PROGRESS', 'WAITING_CLIENT')
+         AND t.assignee_id IS DISTINCT FROM $2
+         AND (t.assignee_id IS NOT NULL OR t.kind <> 'REPORT' OR rt.creates_accountant_task)
+         AND t.kind IN ('ROUTINE', 'REPORT', 'URGENT', 'MANUAL')
      )
      UPDATE task t SET assignee_id = $2 FROM old WHERE t.id = old.id
      RETURNING t.id, old.assignee_id AS "oldAssigneeId"`,

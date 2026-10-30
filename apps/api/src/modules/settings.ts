@@ -8,6 +8,7 @@ import { type Db, one, pool, q, tx } from '../db';
 import { currentPeriod } from '../common/time';
 import { sharePercent } from './clients';
 import { getDueTime } from './generator';
+import { getOverdueReminder, overdueReminderSchema, reminderDays } from './overdueReminder';
 
 // Sozlamalar: hamma o'qiydi, faqat rahbar yozadi. O'zgarishlar keyingi generatsiyadan kuchga kiradi;
 // istisno — hisobot muddat kuni: joriy va keyingi davrlarning ochiq vazifalari ham yangi muddatga o'tadi.
@@ -250,6 +251,26 @@ settingsRouter.delete('/urgent-templates/:id', requireLeader, async (req, res) =
     await saveTemplates(db, list.filter((x) => x.id !== old.id), u.id, 'DELETE', old, null);
   });
   res.status(204).end();
+});
+
+// ---------- Kechikkan mijozlar eslatmasi ----------
+settingsRouter.get('/overdue-reminder', async (_req, res) => {
+  const cfg = await getOverdueReminder(pool);
+  res.json({ ...cfg, previewDays: reminderDays(cfg.steps) });
+});
+
+settingsRouter.put('/overdue-reminder', requireLeader, async (req, res) => {
+  const u = me(req);
+  const body = parse(overdueReminderSchema, req.body);
+  await tx(async (db) => {
+    const before = await getOverdueReminder(db);
+    await db.query(
+      `INSERT INTO setting (key, value) VALUES ('overdue_reminder', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify(body)],
+    );
+    await audit(db, { actorId: u.id, entity: 'setting', entityId: 'overdue_reminder', action: 'UPDATE', before, after: body });
+  });
+  res.json({ ...body, previewDays: reminderDays(body.steps) });
 });
 
 // ---------- Umumiy ----------

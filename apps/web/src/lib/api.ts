@@ -75,7 +75,26 @@ async function request<T>(method: string, url: string, body?: Body, retry = true
   return data as T;
 }
 
+/** Faylni yuklab olish (Authorization sarlavhasi kerak, shuning uchun oddiy <a href> emas) */
+async function download(url: string, filename: string, retry = true): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const r = await fetch(`/api${url}`, { headers, credentials: 'same-origin' });
+  if (r.status === 401 && retry) {
+    if (await tryRefresh()) return download(url, filename, false);
+    onAuthLost?.();
+  }
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new ApiError(r.status, data.code ?? 'HTTP_' + r.status, data.message ?? r.statusText, data.details);
+  }
+  const href = URL.createObjectURL(await r.blob());
+  Object.assign(document.createElement('a'), { href, download: filename }).click();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
 export const api = {
+  download,
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: Body) => request<T>('POST', url, body ?? {}),
   patch: <T>(url: string, body?: Body) => request<T>('PATCH', url, body),

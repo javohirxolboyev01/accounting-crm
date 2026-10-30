@@ -185,3 +185,126 @@
 [data-sonner-toaster] [data-sonner-toast].toast-urgent [data-button] {
   @apply bg-white text-red-600 hover:bg-white/90;
 }
+
+/* Hisobot jadvalini PDF'ga chop etish (Monthly.tsx PrintTable): sahifada faqat jadval qoladi */
+.print-root {
+  display: none;
+}
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+  body > *:not(.print-root) {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  .print-root {
+    display: block;
+    color: #1a344d;
+    font-size: 8pt;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .print-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12mm;
+    margin-bottom: 5mm;
+    border-bottom: 1px solid #d1d5db;
+    padding-bottom: 4mm;
+  }
+  .print-brand {
+    display: flex;
+    align-items: center;
+    gap: 8mm;
+  }
+  .print-logo {
+    width: 40mm;
+    height: auto;
+    color: #023a1f !important;
+  }
+  .print-heading h1 {
+    margin: 0;
+    font-size: 13pt;
+    font-weight: 700;
+  }
+  .print-heading p {
+    margin: 1mm 0 0;
+    color: #4b5563;
+    font-size: 10pt;
+  }
+  .print-leader {
+    display: grid;
+    gap: 1.2mm;
+    min-width: 58mm;
+    text-align: right;
+  }
+  .print-leader strong {
+    font-size: 11pt;
+    font-weight: 700;
+  }
+  .print-leader .print-role {
+    color: #4b5563;
+    font-size: 8pt;
+    font-weight: 400;
+  }
+  .print-signature {
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 3mm;
+    margin-top: 3mm;
+    color: #4b5563;
+    font-size: 8pt;
+  }
+  .print-signature-line {
+    display: inline-block;
+    width: 42mm;
+    height: 5mm;
+    border-bottom: 1px solid #374151;
+  }
+  .print-grid {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .print-grid th,
+  .print-grid td {
+    border: 1px solid #9ca3af;
+    padding: 2px 4px;
+    vertical-align: middle;
+  }
+  .print-grid th {
+    background: #37a0ad;
+    color: #fff;
+    font-weight: 600;
+    text-align: center;
+  }
+  .print-grid th .due {
+    font-weight: 400;
+  }
+  .print-grid thead {
+    display: table-header-group; /* har sahifada sarlavha takrorlanadi */
+  }
+  .print-grid tr {
+    break-inside: avoid;
+  }
+  .print-grid .c {
+    text-align: center;
+  }
+  .print-grid .done {
+    background: #dcfce7;
+  }
+  .print-grid .overdue {
+    background: #fee2e2;
+  }
+  .print-grid .na {
+    background: #f3f4f6;
+  }
+  .print-grid .note {
+    max-width: 60mm;
+  }
+}

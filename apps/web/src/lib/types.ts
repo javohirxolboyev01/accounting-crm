@@ -5,7 +5,7 @@ export type TaxType = 'AOS' | 'QQS';
 export type ClientStatus = 'ACTIVE' | 'ZERO_REPORT' | 'LIQUIDATING';
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'WAITING_CLIENT' | 'DONE' | 'CANCELLED';
 export type TaskKind = 'ROUTINE' | 'REPORT' | 'URGENT' | 'MANUAL';
-export type NotificationKind = 'TASK_DONE' | 'TASK_OVERDUE' | 'URGENT_TASK' | 'LEAD_WON';
+export type NotificationKind = 'TASK_DONE' | 'TASK_OVERDUE' | 'CLIENTS_OVERDUE' | 'URGENT_TASK' | 'LEAD_WON';
 
 export interface Me {
   id: number;

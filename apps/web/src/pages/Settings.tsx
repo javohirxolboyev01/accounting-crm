@@ -318,6 +318,104 @@ function TemplatesTab() {
   );
 }
 
+type ReminderStep = { fromDay: number; everyDays: number };
+type OverdueReminder = { enabled: boolean; sendAt: string; steps: ReminderStep[]; previewDays?: number[] };
+
+/** Backend overdueReminder.isReminderDay bilan bir xil: tahrir paytida kunlarni darhol ko'rsatish uchun */
+function previewDays(steps: ReminderStep[], maxDay = 60) {
+  const valid = steps.filter((s) => s.fromDay >= 1 && s.everyDays >= 1);
+  const out: number[] = [];
+  for (let d = 1; d <= maxDay; d++) {
+    const step = valid.filter((s) => s.fromDay <= d).sort((a, b) => b.fromDay - a.fromDay)[0];
+    if (step && (d - step.fromDay) % step.everyDays === 0) out.push(d);
+  }
+  return out;
+}
+
+function OverdueReminderCard() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['settings', 'overdue-reminder'], queryFn: () => api.get<OverdueReminder>('/settings/overdue-reminder') });
+  const [draft, setDraft] = useState<OverdueReminder | null>(null);
+  useEffect(() => setDraft(q.data ? structuredClone({ enabled: q.data.enabled, sendAt: q.data.sendAt, steps: q.data.steps }) : null), [q.data]);
+  const save = useMutation({
+    mutationFn: (body: OverdueReminder) => api.put('/settings/overdue-reminder', body),
+    onSuccess: () => {
+      toast.success(t('common.saved'));
+      void qc.invalidateQueries({ queryKey: ['settings', 'overdue-reminder'] });
+    },
+    onError: (e) => toast.error(errorText(e, t)),
+  });
+  if (!draft) return null;
+
+  const setStep = (i: number, patch: Partial<ReminderStep>) => setDraft({ ...draft, steps: draft.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const num = (v: string) => Number(v.replace(/\D/g, '').slice(0, 3)) || 0;
+  const fromDays = draft.steps.map((s) => s.fromDay);
+  const valid =
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(draft.sendAt) &&
+    draft.steps.length > 0 &&
+    draft.steps.every((s) => s.fromDay >= 1 && s.everyDays >= 1) &&
+    new Set(fromDays).size === fromDays.length;
+  const server = q.data && { enabled: q.data.enabled, sendAt: q.data.sendAt, steps: q.data.steps };
+  const changed = JSON.stringify(draft) !== JSON.stringify(server);
+  const days = previewDays(draft.steps);
+
+  return (
+    <Card>
+      <CardHeader title={t('settings.overdueReminder')} />
+      <div className="space-y-4 p-4 text-sm">
+        <p className="text-gray-600">{t('settings.overdueReminderHint')}</p>
+        <div className="flex flex-wrap items-end gap-6">
+          <Checkbox label={t('settings.overdueEnabled')} checked={draft.enabled} onChange={(v) => setDraft({ ...draft, enabled: v })} />
+          <Field label={t('settings.overdueSendAt')}>
+            <Input type="time" value={draft.sendAt} onChange={(e) => setDraft({ ...draft, sendAt: e.target.value })} />
+          </Field>
+        </div>
+        <div className="space-y-2">
+          {draft.steps.map((s, i) => (
+            <div key={i} className="flex items-end gap-3">
+              <Field label={t('settings.overdueFromDay')}>
+                <Input inputMode="numeric" className="w-28" value={s.fromDay || ''} onChange={(e) => setStep(i, { fromDay: num(e.target.value) })} />
+              </Field>
+              <Field label={t('settings.overdueEveryDays')}>
+                <Input inputMode="numeric" className="w-28" value={s.everyDays || ''} onChange={(e) => setStep(i, { everyDays: num(e.target.value) })} />
+              </Field>
+              <Button
+                size="icon"
+                variant="ghost"
+                disabled={draft.steps.length === 1}
+                onClick={() => setDraft({ ...draft, steps: draft.steps.filter((_, j) => j !== i) })}
+                aria-label={t('common.delete')}
+              >
+                <Trash2 className="h-4 w-4 text-red-600" />
+              </Button>
+            </div>
+          ))}
+          {draft.steps.length < 10 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setDraft({ ...draft, steps: [...draft.steps, { fromDay: Math.max(0, ...fromDays) + 7, everyDays: 7 }] })}
+            >
+              <Plus className="h-4 w-4" /> {t('settings.overdueAddStep')}
+            </Button>
+          )}
+        </div>
+        <div>
+          <p className="mb-1 text-gray-600">{t('settings.overduePreview')}:</p>
+          <p className="font-medium text-foreground">
+            {days.length ? `${days.join(', ')} … ${t('settings.overdueDaysUnit')}` : '—'}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button disabled={!valid || !changed} loading={save.isPending} onClick={() => save.mutate(draft)}>{t('common.save')}</Button>
+          {changed && <Button variant="outline" onClick={() => server && setDraft(structuredClone(server))}>{t('common.reset')}</Button>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function GeneralTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -358,6 +456,7 @@ function GeneralTab() {
           </Button>
         </div>
       </Card>
+      <OverdueReminderCard />
       <Card>
         <CardHeader title={t('settings.generator')} actions={<Button size="sm" variant="outline" onClick={() => genDry.mutate()}>{t('settings.generatorDryRun')}</Button>} />
         <div className="p-4 text-sm">

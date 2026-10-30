@@ -5,6 +5,7 @@ import { config } from './config';
 import { currentPeriod } from './common/time';
 import { runGenerator } from './modules/generator';
 import { dispatchDue, remindOverdue } from './modules/notifications';
+import { remindOverdueClients } from './modules/overdueReminder';
 
 const tz = { timezone: config.timezone };
 const intervals: NodeJS.Timeout[] = [];
@@ -26,6 +27,8 @@ export function startScheduler() {
   intervals.push(setInterval(safe('dispatcher', () => dispatchDue()), 1000));
   // Muddat o'tdi eslatmasi: har daqiqa
   intervals.push(setInterval(safe('overdue', remindOverdue), 60_000));
+  // Kechikkan mijozlar: har daqiqa tekshiradi, kuniga bir marta (sozlamadagi soatdan keyin) yuboradi
+  intervals.push(setInterval(safe('overdue-clients', () => remindOverdueClients()), 60_000));
 
   if (config.backup.enabled) {
     // Kunlik zaxira 02:30

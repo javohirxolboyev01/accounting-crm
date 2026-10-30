@@ -101,7 +101,7 @@ export function Layout() {
         className: 'toast-urgent',
         action: n.taskId ? { label: t('common.open'), onClick: () => setOpenTask(n.taskId) } : undefined,
       });
-    } else if (n.kind === 'TASK_OVERDUE') {
+    } else if (n.kind === 'TASK_OVERDUE' || n.kind === 'CLIENTS_OVERDUE') {
       toast.warning(text);
     } else if (n.kind === 'LEAD_WON') {
       toast.success(text, {

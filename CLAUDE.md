@@ -144,6 +144,7 @@ Qaror: bildirishnoma `deliver_at = now + 5s` bilan navbatga qo'yiladi; "Bekor qi
 ### 6.7 Eslatmalar
 - Muddatga 24 soat qolganda vazifa sariq.
 - Muddat o'tsa qizil, buxgalter va rahbarga xabar.
+- Kechikkan mijozlar (`CLIENTS_OVERDUE`): har kuni `sendAt` soatida bitta yig'ma xabar — buxgalterga o'z mijozlari (vazifa mas'uli, bo'lmasa mijoz buxgalteri), rahbarga hammasi. Kechikish kuni = eng eski ochiq muddati o'tgan vazifadan beri kalendar kunlar. Mijoz faqat "eslatma kuni"da kiradi: `setting.overdue_reminder.steps` (`fromDay`, `everyDays`), standart 1,2,3,5,7,10,13,16,23,30… Rahbar sozlamadan o'zgartiradi.
 
 ### 6.8 Buxgalter almashsa
 Rahbar mijozga boshqa buxgalter tayinlaydi; tugallanmagan vazifalar yangisiga o'tadi, bajarilganlari eskisida tarixda qoladi. Hammasi `audit_log`'da.

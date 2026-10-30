@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { me, requireAuth, requireLeader } from '../common/auth';
+import { me, requireAuth, requireLeader, requireStaff } from '../common/auth';
 import { audit, diff } from '../common/audit';
 import { AppError, notFound, parse } from '../common/errors';
 import { one, pool, q, tx } from '../db';
@@ -22,6 +22,14 @@ usersRouter.get('/accountants', requireAuth, async (_req, res) => {
        WHERE u.role = 'ACCOUNTANT' AND u.active ORDER BY u.full_name`,
     ),
   );
+});
+
+usersRouter.get('/report-pdf-info', requireAuth, requireStaff, async (req, res) => {
+  const actor = me(req);
+  res.json({
+    downloadedByName: actor.fullName,
+    downloadedByRole: actor.role,
+  });
 });
 
 usersRouter.use(requireAuth, requireLeader);
